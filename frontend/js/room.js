@@ -50,10 +50,10 @@
 
         <div class="vr-top">
           <div class="vr-brand">
-            <button class="vr-logo" id="btnExit" title="사례 선택으로">⬡</button>
+            <button class="vr-logo" id="btnExit" title="사례 선택으로"><img src="assets/kyungmin-logo.png" alt="경민대학교" /></button>
             <div>
-              <strong>경민대학교 통합시뮬레이션수업</strong>
-              <em>Room of Error · CASE ${m.caseId} · ${m.subtitle || ''}</em>
+              <strong>경민대학교 간호학과 통합시뮬레이션수업</strong>
+              <em><span class="vr-credit">Room of Errors · 김정호 교수 제작</span><span class="vr-case"> · CASE ${m.caseId} · ${m.subtitle || ''}</span></em>
             </div>
           </div>
           <div class="vr-tools">
