@@ -56,14 +56,6 @@
           <p>조별로 병실을 관찰해 오류를 기록하고, 즉시 위해가 될 상위 5개를 우선순위화한 뒤 SBAR로 보고합니다.
              총 4개 사례 · 사례당 18개 오류 · 100점 루브릭 자동/수동 채점.</p>
         </div>
-        <aside class="institution-card" aria-label="경민대학교 간호학과 통합시뮬레이션수업">
-          <img src="assets/kyungmin-logo.png" alt="경민대학교 로고" />
-          <div>
-            <span>경민대학교 간호학과</span>
-            <strong>통합시뮬레이션수업</strong>
-            <small>기획·제작 · 김정호 교수</small>
-          </div>
-        </aside>
       </section>
       <div class="case-grid">
         ${S.cases.map((c, i) => `
