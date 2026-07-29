@@ -41,7 +41,7 @@ async function getIdentity(token) {
   return {
     user,
     profile,
-    role: user.app_metadata?.role === 'admin' ? 'admin' : 'student',
+    role: user.app_metadata?.role === 'admin' || profile?.role === 'admin' ? 'admin' : 'student',
   };
 }
 
@@ -69,6 +69,27 @@ async function updateProfile(token, userId, { fullName, studentNumber, grade, cl
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await client(token).from('roe_profiles').update(row).eq('user_id', userId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function requestFacultyAccess(token, identity) {
+  const row = { user_id: identity.user.id, email: identity.user.email,
+    full_name: identity.profile?.full_name || identity.user.user_metadata?.full_name || identity.user.user_metadata?.name || '',
+    status: 'pending', requested_at: new Date().toISOString(), reviewed_at: null, reviewed_by: null };
+  const { data, error } = await client(token).from('roe_faculty_requests').upsert(row, { onConflict: 'user_id' }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function listFacultyRequests(token) {
+  const { data, error } = await client(token).from('roe_faculty_requests').select('*').order('requested_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function reviewFacultyRequest(token, userId, decision) {
+  const { data, error } = await client(token).rpc('roe_review_faculty', { target_user_id: userId, decision });
   if (error) throw error;
   return data;
 }
@@ -108,4 +129,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, reviewFacultyRequest, createSession, getSession, updateSession, listSessions };

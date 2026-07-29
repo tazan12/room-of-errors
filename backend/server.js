@@ -95,6 +95,26 @@ app.put('/api/auth/profile', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/faculty/request', requireAuth, async (req, res) => {
+  try {
+    if (req.auth.role === 'admin') return res.json({ status: 'approved' });
+    res.status(201).json(await db.requestFacultyAccess(req.auth.token, req.auth));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/admin/faculty-requests', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await db.listFacultyRequests(req.auth.token)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/admin/faculty-requests/:userId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const decision = req.body?.decision;
+    if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: '승인 또는 거절을 선택하세요.' });
+    res.json(await db.reviewFacultyRequest(req.auth.token, req.params.userId, decision));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 /* ---------- 유틸: 학생에게 노출할 사례 뷰(정답 숨김) ---------- */
 function publicCase(c) {
   return {

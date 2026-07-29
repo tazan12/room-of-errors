@@ -26,7 +26,12 @@ const API = (() => {
       if (data.session?.access_token) {
         accessToken = data.session.access_token;
         sessionStorage.setItem('roe_access_token', accessToken);
-        try { await this.me(); } catch (_) { await this.logout(); }
+        let lastError;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try { await this.me(); lastError = null; break; }
+          catch (e) { lastError = e; await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1))); }
+        }
+        if (lastError) throw lastError;
       }
       return currentUser;
     },
@@ -55,6 +60,9 @@ const API = (() => {
       return mode;
     },
     updateProfile: (data) => req('PUT', '/api/auth/profile', data),
+    requestFacultyAccess: () => req('POST', '/api/faculty/request'),
+    facultyRequests: () => req('GET', '/api/admin/faculty-requests'),
+    reviewFaculty: (userId, decision) => req('PUT', `/api/admin/faculty-requests/${userId}`, { decision }),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));

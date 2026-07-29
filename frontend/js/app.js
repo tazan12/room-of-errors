@@ -84,6 +84,17 @@
     });
   }
 
+  function viewFacultyPending(request) {
+    app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
+      <div class="eyebrow"><span class="dot-ico">◆</span> FACULTY ACCESS</div>
+      <h2>교수자 승인 대기</h2>
+      <p class="muted">관리자에게 교수자 권한 신청을 전달했습니다. 승인 후 관리자 모드로 다시 로그인해 주세요.</p>
+      <div class="patient-box"><b>${esc(API.user()?.email || '')}</b><p class="muted">신청 상태: ${esc(request?.status || 'pending')}</p></div>
+      <button class="btn ghost full" id="pendingOut">로그아웃</button>
+    </div></div>`;
+    app.querySelector('#pendingOut').addEventListener('click', async () => { await API.logout(); refreshAdminNav(); viewLogin('student'); });
+  }
+
   /* ================= 화면: 홈(사례 선택) ================= */
   async function viewHome() {
     if (!API.isLoggedIn()) return viewLogin('student');
@@ -634,8 +645,8 @@
   async function viewProfessor(preCase) {
     if (!API.isAdmin()) return openAdminLogin();
     document.body.classList.remove('in-room');
-    let rows;
-    try { rows = await API.professorSessions(preCase ? { caseId: preCase } : {}); }
+    let rows, facultyRequests;
+    try { [rows, facultyRequests] = await Promise.all([API.professorSessions(preCase ? { caseId: preCase } : {}), API.facultyRequests()]); }
     catch (e) { API.logout(); refreshAdminNav(); return openAdminLogin(); }
     const q = preCase ? { caseId: preCase } : {};
     app.innerHTML = `
@@ -643,6 +654,13 @@
         <div class="result-head">
           <h2>관리자 대시보드</h2>
           <button class="btn ghost" id="admOut">로그아웃</button>
+        </div>
+        <div class="panel faculty-approval">
+          <h3>교수자 권한 신청</h3>
+          ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
+            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>${esc(r.email)} · ${esc(r.status)}</small></span>
+            ${r.status === 'pending' ? `<span><button class="btn tiny" data-faculty="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected">거절</button></span>` : ''}
+          </div>`).join('') : '<p class="muted">새로운 교수자 신청이 없습니다.</p>'}
         </div>
         <div class="export-bar">
           <span class="muted">데이터 내보내기:</span>
@@ -680,6 +698,10 @@
       el.addEventListener('click', () => API.downloadExport(fmt, q).catch((e) => toast(e.message, 'warn')));
     });
     bindProfRows();
+    app.querySelectorAll('[data-faculty]').forEach((btn) => btn.addEventListener('click', async () => {
+      try { await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : '신청을 거절했습니다.', 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
 
     function rowHtml(r) {
       const b = r.breakdown || {};
@@ -726,8 +748,8 @@
     const mode = API.consumeLoginMode();
     if (mode === 'admin') {
       if (API.isAdmin()) return viewProfessor();
-      await API.logout();
-      viewLogin('admin'); toast('승인된 관리자 계정이 아닙니다.', 'warn'); return;
+      try { return viewFacultyPending(await API.requestFacultyAccess()); }
+      catch (e) { viewLogin('admin'); toast(e.message || '교수자 권한 신청 실패', 'warn'); return; }
     }
     viewHome();
   }).catch(() => viewLogin('student'));
