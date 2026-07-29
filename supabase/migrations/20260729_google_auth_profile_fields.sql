@@ -21,12 +21,16 @@ as $$
     where a.email = lower(coalesce((select auth.jwt()->>'email'), ''))
   );
 $$;
-revoke all on function private.roe_is_admin() from public, anon;
-grant execute on function private.roe_is_admin() to authenticated;
+revoke all on function private.roe_is_admin() from public, anon, authenticated;
 
 create or replace function private.handle_roe_user_created()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
+  if exists (select 1 from private.roe_admin_emails a where a.email = lower(new.email)) then
+    update auth.users
+    set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+    where id = new.id;
+  end if;
   insert into public.roe_profiles (user_id, full_name, student_number, class_name, role)
   values (
     new.id,
@@ -42,18 +46,18 @@ revoke all on function private.handle_roe_user_created() from public, anon, auth
 
 drop policy if exists "roe_profiles_read_own" on public.roe_profiles;
 create policy "roe_profiles_read_own" on public.roe_profiles for select to authenticated
-using ((select auth.uid()) = user_id or (select private.roe_is_admin()));
+using ((select auth.uid()) = user_id or coalesce((select auth.jwt()->'app_metadata'->>'role'),'') = 'admin');
 
 drop policy if exists "roe_profiles_update_own" on public.roe_profiles;
 create policy "roe_profiles_update_own" on public.roe_profiles for update to authenticated
-using ((select auth.uid()) = user_id and not (select private.roe_is_admin()))
+using ((select auth.uid()) = user_id)
 with check ((select auth.uid()) = user_id and role = 'student');
 
 drop policy if exists "roe_sessions_read_authorized" on public.roe_sessions;
 create policy "roe_sessions_read_authorized" on public.roe_sessions for select to authenticated
-using ((select auth.uid()) = student_user_id or (select private.roe_is_admin()));
+using ((select auth.uid()) = student_user_id or coalesce((select auth.jwt()->'app_metadata'->>'role'),'') = 'admin');
 
 drop policy if exists "roe_sessions_update_authorized" on public.roe_sessions;
 create policy "roe_sessions_update_authorized" on public.roe_sessions for update to authenticated
-using ((select auth.uid()) = student_user_id or (select private.roe_is_admin()))
-with check ((select auth.uid()) = student_user_id or (select private.roe_is_admin()));
+using ((select auth.uid()) = student_user_id or coalesce((select auth.jwt()->'app_metadata'->>'role'),'') = 'admin')
+with check ((select auth.uid()) = student_user_id or coalesce((select auth.jwt()->'app_metadata'->>'role'),'') = 'admin');

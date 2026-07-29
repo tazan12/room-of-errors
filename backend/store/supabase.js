@@ -36,11 +36,12 @@ async function getIdentity(token) {
   const sb = client(token);
   const { data: { user }, error } = await sb.auth.getUser(token);
   if (error || !user) return null;
-  const { data: profile } = await sb.from('roe_profiles').select('*').eq('user_id', user.id).maybeSingle();
+  const { data: profile, error: profileError } = await sb.from('roe_profiles').select('*').eq('user_id', user.id).maybeSingle();
+  if (profileError) throw profileError;
   return {
     user,
     profile,
-    role: profile?.role === 'admin' ? 'admin' : 'student',
+    role: user.app_metadata?.role === 'admin' ? 'admin' : 'student',
   };
 }
 
