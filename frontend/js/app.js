@@ -95,10 +95,26 @@
     app.querySelector('#pendingOut').addEventListener('click', async () => { await API.logout(); refreshAdminNav(); viewLogin('student'); });
   }
 
+  function viewStudentPending(profile) {
+    const rejected = profile?.approval_status === 'rejected';
+    app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
+      <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT APPROVAL</div>
+      <h2>${rejected ? '학생 사용 신청이 거절되었습니다' : '학생 사용 승인 대기 중'}</h2>
+      <p class="muted">${rejected ? '입력한 정보를 확인한 뒤 담당 관리자에게 문의해 주세요.' : '학생 정보가 제출되었습니다. 관리자가 승인하면 사례 선택과 병실 입장이 가능합니다.'}</p>
+      <div class="patient-box">
+        <b>${esc(profile?.full_name || '')} · ${esc(profile?.student_number || '')}</b>
+        <p class="muted">${esc(profile?.grade || '')}학년 · ${esc(profile?.class_name || '')} · 상태: ${rejected ? '거절' : '승인 대기'}</p>
+      </div>
+      <button class="btn ghost full" id="studentPendingOut">로그아웃</button>
+    </div></div>`;
+    app.querySelector('#studentPendingOut').addEventListener('click', async () => { await API.logout(); refreshAdminNav(); viewLogin('student'); });
+  }
+
   /* ================= 화면: 홈(사례 선택) ================= */
   async function viewHome() {
     if (!API.isLoggedIn()) return viewLogin('student');
     if (!API.isAdmin() && !profileComplete(API.user()?.profile)) return viewProfileSetup();
+    if (!API.isAdmin() && API.user()?.profile?.approval_status !== 'approved') return viewStudentPending(API.user()?.profile);
     document.body.classList.remove('in-room');
     S.cases = await API.listCases();
     const themeName = { surgical: '수술·낙상', sepsis: '패혈증·격리', stroke: '뇌졸중·연하', diabetes: '당뇨·투약' };
@@ -645,15 +661,18 @@
   async function viewProfessor(preCase) {
     if (!API.isAdmin()) return openAdminLogin();
     document.body.classList.remove('in-room');
-    const [sessionsResult, facultyResult] = await Promise.allSettled([
+    const [sessionsResult, facultyResult, studentsResult] = await Promise.allSettled([
       API.professorSessions(preCase ? { caseId: preCase } : {}),
       API.facultyRequests(),
+      API.studentApprovals(),
     ]);
     const rows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
     const facultyRequests = facultyResult.status === 'fulfilled' ? facultyResult.value : [];
+    const studentApprovals = studentsResult.status === 'fulfilled' ? studentsResult.value : [];
     const loadWarnings = [
       sessionsResult.status === 'rejected' ? `학생 실습 기록: ${sessionsResult.reason?.message || '불러오기 실패'}` : '',
       facultyResult.status === 'rejected' ? `교수자 승인 요청: ${facultyResult.reason?.message || '불러오기 실패'}` : '',
+      studentsResult.status === 'rejected' ? `학생 승인 요청: ${studentsResult.reason?.message || '불러오기 실패'}` : '',
     ].filter(Boolean);
     const q = preCase ? { caseId: preCase } : {};
     app.innerHTML = `
@@ -666,6 +685,13 @@
           </div>
         </div>
         ${loadWarnings.length ? `<div class="panel"><p class="muted">관리자 로그인은 완료되었습니다. 일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
+        <div class="panel faculty-approval">
+          <h3>학생 사용 승인</h3>
+          ${studentApprovals.length ? studentApprovals.map((r) => `<div class="faculty-row">
+            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · ${esc(r.approval_status)}</small></span>
+            <span><button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button></span>
+          </div>`).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
+        </div>
         <div class="panel faculty-approval">
           <h3>교수자 권한 신청</h3>
           ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
@@ -712,6 +738,10 @@
     bindProfRows();
     app.querySelectorAll('[data-faculty]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : '신청을 거절했습니다.', 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
+      try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
     }));
 

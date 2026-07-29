@@ -92,6 +92,8 @@ const API = (() => {
     requestFacultyAccess: () => req('POST', '/api/faculty/request'),
     facultyRequests: () => req('GET', '/api/admin/faculty-requests'),
     reviewFaculty: (userId, decision) => req('PUT', `/api/admin/faculty-requests/${userId}`, { decision }),
+    studentApprovals: () => req('GET', '/api/admin/student-approvals'),
+    reviewStudent: (userId, decision) => req('PUT', `/api/admin/student-approvals/${userId}`, { decision }),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));

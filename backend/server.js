@@ -52,6 +52,11 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 }
 
+function requireApproved(req, res, next) {
+  if (req.auth?.role === 'admin' || req.auth?.profile?.approval_status === 'approved') return next();
+  return res.status(403).json({ error: '관리자 승인 후 사용할 수 있습니다.' });
+}
+
 /* 채점 행 생성(교수 대시보드·내보내기 공용) */
 async function buildScoreRows(token, filter = {}) {
   return (await db.listSessions(token, filter)).map((s) => {
@@ -118,6 +123,19 @@ app.put('/api/admin/faculty-requests/:userId', requireAuth, requireAdmin, async 
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+app.get('/api/admin/student-approvals', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await db.listStudentApprovals(req.auth.token)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/admin/student-approvals/:userId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const decision = req.body?.decision;
+    if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: '승인 또는 거절을 선택하세요.' });
+    res.json(await db.reviewStudentApproval(req.auth.token, req.auth.user.id, req.params.userId, decision));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 /* ---------- 유틸: 학생에게 노출할 사례 뷰(정답 숨김) ---------- */
 function publicCase(c) {
   return {
@@ -151,7 +169,7 @@ app.get('/api/cases/:id', (req, res) => {
   res.json(publicCase(c));
 });
 
-app.get('/api/cases/:id/answers', requireAuth, (req, res) => {
+app.get('/api/cases/:id/answers', requireAuth, requireApproved, (req, res) => {
   const c = CASES.find((x) => x.id === req.params.id.toUpperCase());
   if (!c) return res.status(404).json({ error: 'case not found' });
   res.json({
@@ -161,7 +179,7 @@ app.get('/api/cases/:id/answers', requireAuth, (req, res) => {
 });
 
 /* ================= 세션 API ================= */
-app.post('/api/sessions', requireAuth, async (req, res) => {
+app.post('/api/sessions', requireAuth, requireApproved, async (req, res) => {
   const { caseId } = req.body || {};
   if (!CASES.find((c) => c.id === caseId)) {
     return res.status(400).json({ error: 'invalid caseId' });
@@ -170,44 +188,44 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get('/api/sessions/:id', requireAuth, async (req, res) => {
+app.get('/api/sessions/:id', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(s);
 });
 
-app.put('/api/sessions/:id/findings', requireAuth, async (req, res) => {
+app.put('/api/sessions/:id/findings', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   const findings = Array.isArray(req.body.findings) ? req.body.findings : [];
   res.json(await db.updateSession(req.auth.token, s.id, { findings }));
 });
 
-app.put('/api/sessions/:id/priorities', requireAuth, async (req, res) => {
+app.put('/api/sessions/:id/priorities', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(await db.updateSession(req.auth.token, s.id, { priorities: (req.body.priorities || []).slice(0, 5) }));
 });
 
-app.put('/api/sessions/:id/sbar', requireAuth, async (req, res) => {
+app.put('/api/sessions/:id/sbar', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(await db.updateSession(req.auth.token, s.id, { sbar: req.body.sbar || s.sbar }));
 });
 
-app.put('/api/sessions/:id/reflection', requireAuth, async (req, res) => {
+app.put('/api/sessions/:id/reflection', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(await db.updateSession(req.auth.token, s.id, { reflection: req.body.reflection || s.reflection }));
 });
 
-app.post('/api/sessions/:id/submit', requireAuth, async (req, res) => {
+app.post('/api/sessions/:id/submit', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(await db.updateSession(req.auth.token, s.id, { status: 'reporting', submittedAt: new Date().toISOString() }));
 });
 
-app.get('/api/sessions/:id/score', requireAuth, async (req, res) => {
+app.get('/api/sessions/:id/score', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(finalScore(s));

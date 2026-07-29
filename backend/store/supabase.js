@@ -108,6 +108,28 @@ async function reviewFacultyRequest(token, userId, decision) {
   return data;
 }
 
+async function listStudentApprovals(token) {
+  const { data, error } = await client(token).from('roe_profiles')
+    .select('user_id,full_name,student_number,grade,class_name,approval_status,created_at,approved_at')
+    .eq('role', 'student').order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function reviewStudentApproval(token, adminUserId, userId, decision) {
+  if (!['approved', 'rejected'].includes(decision)) throw new Error('잘못된 승인 상태입니다.');
+  const row = {
+    approval_status: decision,
+    approved_at: new Date().toISOString(),
+    approved_by: adminUserId,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await client(token).from('roe_profiles')
+    .update(row).eq('user_id', userId).eq('role', 'student').select().single();
+  if (error) throw error;
+  return data;
+}
+
 async function createSession(token, userId, data) {
   const row = {
     student_user_id: userId, case_id: data.caseId, class_name: data.className || '',
@@ -143,4 +165,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, reviewFacultyRequest, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, createSession, getSession, updateSession, listSessions };
