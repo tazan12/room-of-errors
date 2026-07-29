@@ -29,7 +29,8 @@
       this.onPractice = opts.onPractice || (() => {});
       this.getState = opts.getState || (() => ({}));
       this.meta = opts.meta || {};              // {caseId,title,subtitle,count}
-      this.tilt = true; this.zoom = 1; this.showMarks = true;
+      this.isMobile = window.matchMedia('(max-width: 600px)').matches;
+      this.tilt = !this.isMobile; this.zoom = 1; this.showMarks = true;
       this.cam = { x: 0, y: 0 };
       this._build();
     }
@@ -69,7 +70,7 @@
           <span class="vr-jump-label">표식 바로가기</span>
           <div class="vr-jump-btns" id="jumpBtns"></div>
         </div>
-        <div class="vr-jump-hint">↔ 아래 1–${m.count} 바로가기 또는 표식을 클릭</div>
+        <div class="vr-jump-hint">${this.isMobile ? '← 좌우로 밀어 병실 탐색 · 번호를 눌러 바로가기 →' : `↔ 아래 1–${m.count} 바로가기 또는 표식을 클릭`}</div>
 
         <div class="vr-controls">
           <button class="vr-ctl on" id="ctlTilt">기울여 보기</button>
@@ -86,6 +87,7 @@
       this.jumpEl = this.el.querySelector('#jumpBtns');
       this._bindChrome();
       this._bindParallax();
+      if (this.isMobile) this.el.classList.add('mobile-room');
     }
 
     _bindChrome() {
@@ -103,6 +105,7 @@
         hide.classList.toggle('primary', !this.showMarks);
       };
       const tilt = this.el.querySelector('#ctlTilt');
+      tilt.classList.toggle('on', this.tilt);
       tilt.onclick = () => { this.tilt = !this.tilt; tilt.classList.toggle('on', this.tilt); if (!this.tilt) this._resetCam(); };
       const motion = this.el.querySelector('#ctlMotion');
       motion.onclick = () => { this.el.classList.toggle('reduce-motion'); motion.classList.toggle('on'); };
