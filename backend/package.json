@@ -1,0 +1,17 @@
+{
+  "name": "room-of-errors-app",
+  "version": "1.0.0",
+  "description": "Room of Errors 간호 환자안전 시뮬레이션 — 2.5D VR형 병실 웹앱",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "xlsx": "^0.18.5"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
