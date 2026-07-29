@@ -566,7 +566,7 @@ textarea { resize: vertical; min-height: 60px; }
 
   .vr-room { min-height: 100dvh; height: 100dvh; cursor: default; }
   .vr-scene {
-    top: 150px; bottom: 116px; align-items: center; justify-content: flex-start;
+    top: 128px; bottom: 116px; align-items: center; justify-content: flex-start;
     overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
     scrollbar-width: thin; scrollbar-color: rgba(120,224,218,.45) transparent;
     touch-action: pan-x;
@@ -582,17 +582,28 @@ textarea { resize: vertical; min-height: 60px; }
   .vr-mark-tip { display: none; }
 
   .vr-top {
-    height: 150px; box-sizing: border-box; padding: 10px 12px;
-    align-items: flex-start; gap: 8px; background: rgba(6,20,24,.92);
+    height: 128px; box-sizing: border-box; padding: 8px 10px 9px;
+    display: grid; grid-template-rows: 38px 1fr; gap: 6px;
+    align-items: stretch; background: rgba(6,20,24,.94);
   }
-  .vr-brand { min-width: 136px; max-width: 142px; gap: 7px; }
-  .vr-logo { width: 36px; height: 36px; border-radius: 11px; font-size: 17px; }
-  .vr-brand strong { font-size: 10.5px; line-height: 1.35; }
-  .vr-brand em { display: block; margin-top: 3px; font-size: 9px; line-height: 1.35; }
+  .vr-brand { width: 100%; min-width: 0; max-width: none; gap: 8px; }
+  .vr-brand > div { min-width: 0; }
+  .vr-logo { width: 34px; height: 34px; border-radius: 10px; font-size: 16px; }
+  .vr-logo img { width: 27px; height: 27px; }
+  .vr-brand strong { font-size: 11px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vr-brand em { display: block; margin-top: 2px; font-size: 9px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .vr-brand .vr-case { display: none; }
-  .vr-tools { flex: 1; gap: 5px; }
-  .vr-progress, .vr-btn { min-height: 34px; padding: 7px 10px; font-size: 11px; }
-  .vr-progress { order: -1; }
+  .vr-tools {
+    width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(2, 1fr); gap: 5px;
+  }
+  .vr-progress, .vr-btn {
+    width: 100%; min-width: 0; min-height: 0; padding: 6px 4px; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; line-height: 1.1; white-space: nowrap;
+  }
+  .vr-progress { order: 0; }
+  .on-dot { width: 6px; height: 6px; }
 
   .vr-jump {
     left: 10px; right: 10px; bottom: 58px; transform: none; max-width: none;
@@ -602,7 +613,7 @@ textarea { resize: vertical; min-height: 60px; }
   .vr-jump-btns { width: 100%; gap: 6px; }
   .vr-jbtn { width: 32px; height: 32px; font-size: 12px; }
   .vr-jump-hint { bottom: 42px; width: 100%; text-align: center; font-size: 10px; }
-  .vr-guide { top: 156px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+  .vr-guide { top: 134px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
   .vr-controls { left: 10px; right: 10px; bottom: 8px; gap: 5px; }
   .vr-ctl { padding: 8px 10px; font-size: 10px; }
   .vr-controls #ctlTilt, .vr-controls #ctlVR { display: none; }
