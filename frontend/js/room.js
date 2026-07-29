@@ -32,6 +32,9 @@
       this.isMobile = window.matchMedia('(max-width: 600px)').matches;
       this.tilt = !this.isMobile; this.zoom = 1; this.showMarks = true;
       this.cam = { x: 0, y: 0 };
+      this.orientationBase = null;
+      this.orientationStartScroll = 0;
+      this.orientationHandler = (e) => this._onOrientation(e);
       this._build();
     }
 
@@ -84,6 +87,7 @@
         </div>`;
 
       this.stage = this.el.querySelector('#stage');
+      this.scene = this.el.querySelector('.vr-scene');
       this.markersEl = this.el.querySelector('#markers');
       this.jumpEl = this.el.querySelector('#jumpBtns');
       this._bindChrome();
@@ -94,8 +98,11 @@
     _bindChrome() {
       this.el.querySelector('#btnInfo').onclick = () => this.onInfo();
       this.el.querySelector('#btnList').onclick = () => this.onList();
-      this.el.querySelector('#btnExit').onclick = () => this.onExit();
-      this.el.querySelector('#btnFinish').onclick = () => this.onFinish();
+      this.el.querySelector('#btnExit').onclick = () => { this._dispose(); this.onExit(); };
+      this.el.querySelector('#btnFinish').onclick = async () => {
+        await this.onFinish();
+        if (!document.body.classList.contains('in-room')) this._dispose();
+      };
       const prac = this.el.querySelector('#btnPractice');
       prac.onclick = () => { const on = this.onPractice(); prac.classList.toggle('on', on); prac.textContent = on ? '💡 연습 힌트 ✓' : '💡 연습 힌트'; };
       const hide = this.el.querySelector('#btnHide');
@@ -107,10 +114,28 @@
       };
       const tilt = this.el.querySelector('#ctlTilt');
       tilt.classList.toggle('on', this.tilt);
-      tilt.onclick = () => { this.tilt = !this.tilt; tilt.classList.toggle('on', this.tilt); if (!this.tilt) this._resetCam(); };
+      tilt.onclick = async () => {
+        if (this.isMobile) await this._toggleMobileTilt(tilt);
+        else { this.tilt = !this.tilt; tilt.classList.toggle('on', this.tilt); if (!this.tilt) this._resetCam(); }
+      };
       const motion = this.el.querySelector('#ctlMotion');
       motion.onclick = () => { this.el.classList.toggle('reduce-motion'); motion.classList.toggle('on'); };
-      this.el.querySelector('#ctlVR').onclick = () => this.el.classList.toggle('vr-goggle');
+      const vr = this.el.querySelector('#ctlVR');
+      vr.onclick = async () => {
+        const enabled = !this.el.classList.contains('vr-goggle');
+        this.el.classList.toggle('vr-goggle', enabled);
+        vr.classList.toggle('on', enabled);
+        vr.textContent = enabled ? 'VR 종료' : 'VR 고글';
+        try {
+          if (enabled) {
+            await (this.el.requestFullscreen?.() || Promise.resolve());
+            await screen.orientation?.lock?.('landscape');
+          } else {
+            screen.orientation?.unlock?.();
+            if (document.fullscreenElement) await document.exitFullscreen?.();
+          }
+        } catch (_) { /* 일부 모바일 브라우저는 전체화면/회전 잠금을 지원하지 않음 */ }
+      };
       this.el.querySelector('#ctlFull').onclick = () => {
         if (!document.fullscreenElement) this.el.requestFullscreen?.();
         else document.exitFullscreen?.();
@@ -132,6 +157,50 @@
       this.el.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
       this.el.addEventListener('mouseleave', () => this._resetCam());
       this.el.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) onMove(t.clientX, t.clientY); }, { passive: true });
+    }
+    async _toggleMobileTilt(button) {
+      if (this.tilt) {
+        this.tilt = false;
+        window.removeEventListener('deviceorientation', this.orientationHandler, true);
+        button.classList.remove('on');
+        button.textContent = '기울여 보기';
+        return;
+      }
+      try {
+        if (typeof DeviceOrientationEvent === 'undefined') throw new Error('이 기기는 방향 센서를 지원하지 않습니다.');
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission !== 'granted') throw new Error('기울이기 센서 권한이 필요합니다.');
+        }
+        this.orientationBase = null;
+        this.orientationStartScroll = this.scene?.scrollLeft || 0;
+        window.addEventListener('deviceorientation', this.orientationHandler, true);
+        this.tilt = true;
+        button.classList.add('on');
+        button.textContent = '기울이기 ON';
+      } catch (e) {
+        this.tilt = false;
+        button.classList.remove('on');
+        window.alert(e.message || '기울이기 기능을 시작할 수 없습니다.');
+      }
+    }
+    _onOrientation(e) {
+      if (!this.tilt || !this.scene || typeof e.gamma !== 'number') return;
+      if (this.orientationBase == null) {
+        this.orientationBase = e.gamma;
+        this.orientationStartScroll = this.scene.scrollLeft;
+      }
+      let delta = e.gamma - this.orientationBase;
+      if (delta > 90) delta -= 180;
+      if (delta < -90) delta += 180;
+      delta = Math.max(-45, Math.min(45, delta));
+      const max = Math.max(0, this.scene.scrollWidth - this.scene.clientWidth);
+      const target = Math.max(0, Math.min(max, this.orientationStartScroll + delta * 7));
+      this.scene.scrollLeft += (target - this.scene.scrollLeft) * 0.22;
+    }
+    _dispose() {
+      window.removeEventListener('deviceorientation', this.orientationHandler, true);
+      screen.orientation?.unlock?.();
     }
     _resetCam() { this.cam.x = 0; this.cam.y = 0; this._applyCam(); }
     _applyCam() {

@@ -614,9 +614,14 @@ textarea { resize: vertical; min-height: 60px; }
   .vr-jbtn { width: 32px; height: 32px; font-size: 12px; }
   .vr-jump-hint { bottom: 42px; width: 100%; text-align: center; font-size: 10px; }
   .vr-guide { top: 134px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
-  .vr-controls { left: 10px; right: 10px; bottom: 8px; gap: 5px; }
-  .vr-ctl { padding: 8px 10px; font-size: 10px; }
-  .vr-controls #ctlTilt, .vr-controls #ctlVR { display: none; }
+  .vr-controls {
+    left: 10px; right: 10px; bottom: 8px; gap: 5px;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .vr-ctl {
+    min-width: 0; padding: 8px 3px; font-size: 9.5px; line-height: 1.1;
+    white-space: nowrap;
+  }
   .vr-zoom { display: none; }
 
   .modal-back { padding: 10px; align-items: flex-end; }
