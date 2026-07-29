@@ -5,12 +5,28 @@ const API = (() => {
   let currentUser = JSON.parse(sessionStorage.getItem('roe_user') || 'null');
   let authClient = null;
 
-  async function req(method, url, body) {
+  function clearCachedAuth() {
+    accessToken = '';
+    currentUser = null;
+    sessionStorage.removeItem('roe_access_token');
+    sessionStorage.removeItem('roe_user');
+  }
+
+  async function req(method, url, body, allowRefresh = true) {
     const headers = { 'Content-Type': 'application/json' };
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
     const opt = { method, headers };
     if (body !== undefined) opt.body = JSON.stringify(body);
     const r = await fetch(base + url, opt);
+    if (r.status === 401 && allowRefresh && authClient) {
+      const { data, error } = await authClient.auth.refreshSession();
+      if (!error && data.session?.access_token) {
+        accessToken = data.session.access_token;
+        sessionStorage.setItem('roe_access_token', accessToken);
+        return req(method, url, body, false);
+      }
+      clearCachedAuth();
+    }
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
     return r.json();
   }
@@ -42,6 +58,9 @@ const API = (() => {
         // Auth app metadata is issued by the server and is sufficient to route
         // an administrator even if the profile endpoint is temporarily delayed.
         if (lastError && currentUser.role !== 'admin') throw lastError;
+      } else {
+        // Never route from stale sessionStorage data after a server-side logout.
+        clearCachedAuth();
       }
       return currentUser;
     },
@@ -80,8 +99,7 @@ const API = (() => {
     },
     async logout() {
       if (authClient) await authClient.auth.signOut().catch(() => {});
-      accessToken = ''; currentUser = null;
-      sessionStorage.removeItem('roe_access_token'); sessionStorage.removeItem('roe_user');
+      clearCachedAuth();
       sessionStorage.removeItem('roe_login_mode');
     },
     async downloadExport(fmt, q = {}) {

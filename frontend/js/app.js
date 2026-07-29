@@ -660,7 +660,10 @@
       <div class="page-wide">
         <div class="result-head">
           <h2>관리자 대시보드</h2>
-          <button class="btn ghost" id="admOut">로그아웃</button>
+          <div>
+            <button class="btn primary" id="adminCases">사례 선택 · 병실 입장</button>
+            <button class="btn ghost" id="admOut">로그아웃</button>
+          </div>
         </div>
         ${loadWarnings.length ? `<div class="panel"><p class="muted">관리자 로그인은 완료되었습니다. 일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
         <div class="panel faculty-approval">
@@ -699,6 +702,7 @@
         </table>
       </div>`;
     app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value));
+    app.querySelector('#adminCases').addEventListener('click', viewHome);
     app.querySelector('#admOut').addEventListener('click', () => { API.logout(); refreshAdminNav(); viewLogin('student'); });
     // 내보내기 링크(다운로드는 헤더를 못 실으므로 code를 쿼리로 전달)
     [['exXlsx','xlsx'],['exCsv','csv'],['exDoc','doc'],['exPdf','html']].forEach(([id, fmt]) => {
