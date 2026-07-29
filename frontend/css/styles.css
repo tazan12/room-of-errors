@@ -525,6 +525,10 @@ textarea { resize: vertical; min-height: 60px; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.ok { border-color: var(--aqua); }
 .toast.warn { border-color: var(--coral); }
+.btn.google { background: #fff; color: #202124; border-color: #dadce0; justify-content: center; }
+.btn.google:hover { background: #f8fafd; border-color: #c7d0dc; }
+.google-g { display: inline-grid; place-items: center; margin-right: 9px; color: #4285f4; font-weight: 900; font-size: 18px; }
+.auth-note { margin: 14px 0 0; text-align: center; color: var(--muted); font-size: 12px; }
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 900px) {

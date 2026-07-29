@@ -40,7 +40,7 @@ async function getIdentity(token) {
   return {
     user,
     profile,
-    role: user.app_metadata?.role === 'admin' ? 'admin' : 'student',
+    role: profile?.role === 'admin' ? 'admin' : 'student',
   };
 }
 
@@ -55,6 +55,19 @@ async function signUp({ email, password, fullName, studentNumber, className }) {
 
 async function signIn({ email, password }) {
   const { data, error } = await client().auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+async function updateProfile(token, userId, { fullName, studentNumber, grade, className }) {
+  const row = {
+    full_name: fullName,
+    student_number: studentNumber,
+    grade,
+    class_name: className,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await client(token).from('roe_profiles').update(row).eq('user_id', userId).select().single();
   if (error) throw error;
   return data;
 }
@@ -94,4 +107,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, createSession, getSession, updateSession, listSessions };

@@ -65,13 +65,8 @@ async function buildScoreRows(token, filter = {}) {
 }
 
 /* ================= 인증 API ================= */
-app.post('/api/auth/signup', async (req, res) => {
-  try {
-    const { email, password, fullName, studentNumber, className } = req.body || {};
-    if (!email || !password || !fullName || !studentNumber) return res.status(400).json({ error: '이메일, 비밀번호, 이름, 학번을 입력하세요.' });
-    const data = await db.signUp({ email, password, fullName, studentNumber, className });
-    res.status(201).json({ session: data.session, needsEmailConfirmation: !data.session });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+app.get('/api/auth/public-config', (req, res) => {
+  res.json({ supabaseUrl: process.env.SUPABASE_URL, publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -84,6 +79,20 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ id: req.auth.user.id, email: req.auth.user.email, role: req.auth.role, profile: req.auth.profile });
+});
+
+app.put('/api/auth/profile', requireAuth, async (req, res) => {
+  try {
+    if (req.auth.role === 'admin') return res.status(403).json({ error: '학생 계정만 학생 정보를 수정할 수 있습니다.' });
+    const { fullName, studentNumber, grade, className } = req.body || {};
+    if (!fullName || !studentNumber || !grade || !className) return res.status(400).json({ error: '이름, 학번, 학년, 반을 모두 입력하세요.' });
+    if (!['1', '2', '3', '4'].includes(String(grade))) return res.status(400).json({ error: '학년을 올바르게 선택하세요.' });
+    const profile = await db.updateProfile(req.auth.token, req.auth.user.id, { fullName, studentNumber, grade: Number(grade), className });
+    res.json(profile);
+  } catch (e) {
+    const duplicate = e.code === '23505' || /duplicate|unique/i.test(e.message || '');
+    res.status(duplicate ? 409 : 400).json({ error: duplicate ? '이미 등록된 학번입니다.' : e.message });
+  }
 });
 
 /* ---------- 유틸: 학생에게 노출할 사례 뷰(정답 숨김) ---------- */

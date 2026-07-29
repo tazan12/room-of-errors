@@ -51,45 +51,43 @@
         <div class="panel auth-panel">
           <div class="eyebrow"><span class="dot-ico">◆</span> ${admin ? 'ADMIN' : 'STUDENT'} ACCESS</div>
           <h2>${admin ? '관리자 로그인' : '학생 로그인'}</h2>
-          <p class="muted">${admin ? '관리자 계정으로 로그인하면 전체 실습 기록과 채점 기능을 사용할 수 있습니다.' : '개인 실습 기록을 안전하게 저장하려면 로그인하세요.'}</p>
-          <div class="form-grid">
-            <label class="full">이메일<input id="authEmail" type="email" autocomplete="username" placeholder="name@example.com" /></label>
-            <label class="full">비밀번호<input id="authPassword" type="password" autocomplete="current-password" placeholder="8자 이상" /></label>
-          </div>
-          <button class="btn primary lg full" id="authLogin">로그인</button>
-          ${admin ? '' : `<details class="signup-box"><summary>처음 사용하는 학생인가요? 계정 만들기</summary>
-            <div class="form-grid">
-              <label>이름<input id="signupName" autocomplete="name" /></label>
-              <label>학번<input id="signupNumber" /></label>
-              <label class="full">반<input id="signupClass" placeholder="예: 4학년 A반" /></label>
-            </div>
-            <button class="btn ghost full" id="authSignup">학생 계정 만들기</button>
-          </details>`}
+          <p class="muted">${admin ? '학교에서 승인된 관리자 Google 계정만 전체 실습 기록과 채점 기능을 사용할 수 있습니다.' : '학교 Google 계정으로 안전하게 로그인하세요.'}</p>
+          <button class="btn google lg full" id="googleLogin"><span class="google-g">G</span> ${admin ? '승인된 관리자 계정으로 로그인' : 'Google 계정으로 계속하기'}</button>
+          ${admin ? '<p class="auth-note">관리자 권한은 서버의 이메일 허용목록으로 확인합니다.</p>' : `
+          <p class="auth-note">로그인 후 이름·학번·학년·반을 등록합니다.</p>`}
         </div>
       </div>`;
-    const login = async () => {
+    app.querySelector('#googleLogin').addEventListener('click', () => API.loginWithGoogle(admin ? 'admin' : 'student').catch((e) => toast(e.message || 'Google 로그인 실패', 'warn')));
+  }
+
+  function profileComplete(profile) {
+    return !!(profile?.full_name && profile?.student_number && profile?.grade && profile?.class_name);
+  }
+
+  function viewProfileSetup() {
+    const profile = API.user()?.profile || {};
+    app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
+      <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT PROFILE</div>
+      <h2>학생 정보 입력</h2><p class="muted">실습 기록 구분을 위해 최초 1회 입력합니다.</p>
+      <div class="form-grid">
+        <label>이름<input id="profileName" autocomplete="name" value="${esc(profile.full_name || '')}" /></label>
+        <label>학번<input id="profileNumber" inputmode="numeric" value="${esc(profile.student_number || '')}" /></label>
+        <label>학년<select id="profileGrade"><option value="">선택</option>${[1,2,3,4].map((g) => `<option value="${g}" ${Number(profile.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
+        <label>반<input id="profileClass" placeholder="예: A반 또는 1반" value="${esc(profile.class_name || '')}" /></label>
+      </div><button class="btn primary lg full" id="saveProfile">저장하고 시작하기</button>
+    </div></div>`;
+    app.querySelector('#saveProfile').addEventListener('click', async () => {
       try {
-        const user = await API.login(app.querySelector('#authEmail').value.trim(), app.querySelector('#authPassword').value);
-        if (admin && user.role !== 'admin') { API.logout(); throw new Error('관리자 권한이 없는 계정입니다.'); }
-        refreshAdminNav(); admin ? viewProfessor() : viewHome();
-      } catch (e) { toast(e.message || '로그인 실패', 'warn'); }
-    };
-    app.querySelector('#authLogin').addEventListener('click', login);
-    if (!admin) app.querySelector('#authSignup').addEventListener('click', async () => {
-      try {
-        const result = await API.signup({
-          email: app.querySelector('#authEmail').value.trim(), password: app.querySelector('#authPassword').value,
-          fullName: app.querySelector('#signupName').value.trim(), studentNumber: app.querySelector('#signupNumber').value.trim(),
-          className: app.querySelector('#signupClass').value.trim(),
-        });
-        toast(result.needsEmailConfirmation ? '가입 완료 — 이메일 인증 후 로그인하세요' : '가입 완료 — 로그인해 주세요', 'ok');
-      } catch (e) { toast(e.message || '가입 실패', 'warn'); }
+        await API.updateProfile({ fullName: app.querySelector('#profileName').value.trim(), studentNumber: app.querySelector('#profileNumber').value.trim(), grade: app.querySelector('#profileGrade').value, className: app.querySelector('#profileClass').value.trim() });
+        await API.me(); toast('학생 정보가 저장되었습니다.', 'ok'); viewHome();
+      } catch (e) { toast(e.message || '학생 정보 저장 실패', 'warn'); }
     });
   }
 
   /* ================= 화면: 홈(사례 선택) ================= */
   async function viewHome() {
     if (!API.isLoggedIn()) return viewLogin('student');
+    if (!API.isAdmin() && !profileComplete(API.user()?.profile)) return viewProfileSetup();
     document.body.classList.remove('in-room');
     S.cases = await API.listCases();
     const themeName = { surgical: '수술·낙상', sepsis: '패혈증·격리', stroke: '뇌졸중·연하', diabetes: '당뇨·투약' };
@@ -722,6 +720,15 @@
   document.getElementById('homeBtn').addEventListener('click', viewHome);
   refreshAdminNav();
 
-  // 초기 진입
-  viewHome();
+  // 초기 진입: Google OAuth 콜백 세션을 먼저 복원
+  API.init().then(async () => {
+    refreshAdminNav();
+    const mode = API.consumeLoginMode();
+    if (mode === 'admin') {
+      if (API.isAdmin()) return viewProfessor();
+      await API.logout();
+      viewLogin('admin'); toast('승인된 관리자 계정이 아닙니다.', 'warn'); return;
+    }
+    viewHome();
+  }).catch(() => viewLogin('student'));
 })();

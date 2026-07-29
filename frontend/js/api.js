@@ -3,6 +3,7 @@ const API = (() => {
   const base = '';
   let accessToken = sessionStorage.getItem('roe_access_token') || '';
   let currentUser = JSON.parse(sessionStorage.getItem('roe_user') || 'null');
+  let authClient = null;
 
   async function req(method, url, body) {
     const headers = { 'Content-Type': 'application/json' };
@@ -16,6 +17,19 @@ const API = (() => {
 
   return {
     /* 인증 */
+    async init() {
+      const config = await req('GET', '/api/auth/public-config');
+      authClient = window.supabase.createClient(config.supabaseUrl, config.publishableKey, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      });
+      const { data } = await authClient.auth.getSession();
+      if (data.session?.access_token) {
+        accessToken = data.session.access_token;
+        sessionStorage.setItem('roe_access_token', accessToken);
+        try { await this.me(); } catch (_) { await this.logout(); }
+      }
+      return currentUser;
+    },
     isLoggedIn: () => !!accessToken,
     isAdmin: () => currentUser?.role === 'admin',
     user: () => currentUser,
@@ -26,13 +40,32 @@ const API = (() => {
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
       return currentUser;
     },
-    signup: (data) => req('POST', '/api/auth/signup', data),
+    async loginWithGoogle(mode = 'student') {
+      if (!authClient) throw new Error('인증 서비스를 준비하는 중입니다.');
+      sessionStorage.setItem('roe_login_mode', mode);
+      const { error } = await authClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${location.origin}/` },
+      });
+      if (error) throw error;
+    },
+    consumeLoginMode() {
+      const mode = sessionStorage.getItem('roe_login_mode') || '';
+      sessionStorage.removeItem('roe_login_mode');
+      return mode;
+    },
+    updateProfile: (data) => req('PUT', '/api/auth/profile', data),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
       return currentUser;
     },
-    logout() { accessToken = ''; currentUser = null; sessionStorage.removeItem('roe_access_token'); sessionStorage.removeItem('roe_user'); },
+    async logout() {
+      if (authClient) await authClient.auth.signOut().catch(() => {});
+      accessToken = ''; currentUser = null;
+      sessionStorage.removeItem('roe_access_token'); sessionStorage.removeItem('roe_user');
+      sessionStorage.removeItem('roe_login_mode');
+    },
     async downloadExport(fmt, q = {}) {
       const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v));
       const r = await fetch(`/api/export/scores.${fmt}?${p}`, { headers: { Authorization: `Bearer ${accessToken}` } });
