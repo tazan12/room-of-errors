@@ -26,12 +26,22 @@ const API = (() => {
       if (data.session?.access_token) {
         accessToken = data.session.access_token;
         sessionStorage.setItem('roe_access_token', accessToken);
+        const sessionUser = data.session.user;
+        currentUser = {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          role: sessionUser.app_metadata?.role === 'admin' ? 'admin' : 'student',
+          profile: null,
+        };
+        sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
         let lastError;
         for (let attempt = 0; attempt < 3; attempt += 1) {
           try { await this.me(); lastError = null; break; }
           catch (e) { lastError = e; await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1))); }
         }
-        if (lastError) throw lastError;
+        // Auth app metadata is issued by the server and is sufficient to route
+        // an administrator even if the profile endpoint is temporarily delayed.
+        if (lastError && currentUser.role !== 'admin') throw lastError;
       }
       return currentUser;
     },

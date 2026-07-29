@@ -36,6 +36,11 @@ async function getIdentity(token) {
   const sb = client(token);
   const { data: { user }, error } = await sb.auth.getUser(token);
   if (error || !user) return null;
+  // Administrators are identified by trusted Auth app metadata.  Do not make
+  // admin access depend on the student profile table being available.
+  if (user.app_metadata?.role === 'admin') {
+    return { user, profile: null, role: 'admin' };
+  }
   const { data: profile } = await sb.from('roe_profiles').select('*').eq('user_id', user.id).maybeSingle();
   return {
     user,
