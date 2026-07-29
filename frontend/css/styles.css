@@ -534,16 +534,20 @@ textarea { resize: vertical; min-height: 60px; }
 /* ---------- 휴대폰: 병실을 축소하지 않고 가로로 탐색 ---------- */
 @media (max-width: 600px) {
   body { overflow-x: hidden; }
-  .topbar { min-height: 72px; padding: 10px 14px; gap: 8px; }
-  .brand-logo { width: 38px; height: 38px; }
-  .brand { gap: 7px; }
-  .brand strong { font-size: 11.5px; white-space: nowrap; }
-  .brand em { font-size: 8.5px; max-width: 138px; white-space: nowrap; }
+  .topbar {
+    min-height: 0; padding: 11px 14px 12px; gap: 10px;
+    flex-direction: column; align-items: stretch;
+  }
+  .brand-logo { width: 42px; height: 42px; }
+  .brand { width: 100%; gap: 10px; }
+  .brand strong { font-size: 14px; white-space: nowrap; }
+  .brand em { display: block; font-size: 10px; max-width: none; white-space: nowrap; }
   .creator-credit { display: none; }
-  .nav { gap: 5px; }
-  .nav button { padding: 9px 11px; font-size: 11px; }
+  .topnav { width: 100%; gap: 7px; }
+  .navbtn { flex: 1; padding: 9px 10px; font-size: 11px; }
   .hero { margin-top: 28px; padding: 0 16px; }
-  .hero h1 { font-size: clamp(27px, 8.2vw, 34px); line-height: 1.18; }
+  .hero h1 { font-size: clamp(27px, 7.4vw, 32px); line-height: 1.2; word-break: keep-all; }
+  .hero h1 span { word-break: keep-all; }
   .case-grid { grid-template-columns: minmax(0, 1fr); padding: 0 16px; gap: 14px; }
   .case-card { padding: 20px; }
 
