@@ -645,9 +645,16 @@
   async function viewProfessor(preCase) {
     if (!API.isAdmin()) return openAdminLogin();
     document.body.classList.remove('in-room');
-    let rows, facultyRequests;
-    try { [rows, facultyRequests] = await Promise.all([API.professorSessions(preCase ? { caseId: preCase } : {}), API.facultyRequests()]); }
-    catch (e) { API.logout(); refreshAdminNav(); return openAdminLogin(); }
+    const [sessionsResult, facultyResult] = await Promise.allSettled([
+      API.professorSessions(preCase ? { caseId: preCase } : {}),
+      API.facultyRequests(),
+    ]);
+    const rows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
+    const facultyRequests = facultyResult.status === 'fulfilled' ? facultyResult.value : [];
+    const loadWarnings = [
+      sessionsResult.status === 'rejected' ? `학생 실습 기록: ${sessionsResult.reason?.message || '불러오기 실패'}` : '',
+      facultyResult.status === 'rejected' ? `교수자 승인 요청: ${facultyResult.reason?.message || '불러오기 실패'}` : '',
+    ].filter(Boolean);
     const q = preCase ? { caseId: preCase } : {};
     app.innerHTML = `
       <div class="page-wide">
@@ -655,6 +662,7 @@
           <h2>관리자 대시보드</h2>
           <button class="btn ghost" id="admOut">로그아웃</button>
         </div>
+        ${loadWarnings.length ? `<div class="panel"><p class="muted">관리자 로그인은 완료되었습니다. 일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
         <div class="panel faculty-approval">
           <h3>교수자 권한 신청</h3>
           ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
