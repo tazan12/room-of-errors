@@ -34,8 +34,18 @@ function toSession(row) {
 
 async function getIdentity(token) {
   const sb = client(token);
-  const { data: { user }, error } = await sb.auth.getUser(token);
-  if (error || !user) return null;
+  // Verify the signed access token directly. This avoids making every API
+  // request depend on a separate Auth user lookup while still rejecting
+  // expired, altered, or unsigned tokens.
+  const { data, error } = await sb.auth.getClaims(token);
+  const claims = data?.claims;
+  if (error || !claims?.sub) return null;
+  const user = {
+    id: claims.sub,
+    email: claims.email || '',
+    app_metadata: claims.app_metadata || {},
+    user_metadata: claims.user_metadata || {},
+  };
   // Administrators are identified by trusted Auth app metadata.  Do not make
   // admin access depend on the student profile table being available.
   if (user.app_metadata?.role === 'admin') {

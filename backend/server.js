@@ -41,7 +41,10 @@ async function requireAuth(req, res, next) {
     if (!identity) return res.status(401).json({ error: '로그인이 필요합니다.' });
     req.auth = { token, ...identity };
     next();
-  } catch (e) { res.status(401).json({ error: '인증 세션이 유효하지 않습니다.' }); }
+  } catch (e) {
+    console.error('[auth] token verification failed:', e?.message || e);
+    res.status(401).json({ error: '로그인 인증을 확인하지 못했습니다. 다시 로그인해 주세요.' });
+  }
 }
 
 function requireAdmin(req, res, next) {
