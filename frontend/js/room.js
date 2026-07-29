@@ -71,6 +71,7 @@
           <div class="vr-jump-btns" id="jumpBtns"></div>
         </div>
         <div class="vr-jump-hint">${this.isMobile ? '← 좌우로 밀어 병실 탐색 · 번호를 눌러 바로가기 →' : `↔ 아래 1–${m.count} 바로가기 또는 표식을 클릭`}</div>
+        <div class="vr-guide">번호를 눌러 오류를 기록하세요 <span>· 1개 이상 기록 후 관찰 종료</span></div>
 
         <div class="vr-controls">
           <button class="vr-ctl on" id="ctlTilt">기울여 보기</button>

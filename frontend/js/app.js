@@ -377,9 +377,30 @@
 
   /* ================= 화면: 우선순위화 ================= */
   async function viewPriority() {
-    document.body.classList.remove('in-room');
     const flagged = (S.session.findings || []).filter((f) => f.flagged);
-    if (flagged.length === 0) return toast('먼저 병실에서 오류를 기록하세요', 'warn');
+    if (flagged.length === 0) {
+      const modal = document.getElementById('inspectModal');
+      modal.innerHTML = `
+        <div class="modal finish-help">
+          <button class="modal-x" id="mx">✕</button>
+          <div class="finish-help-icon">1</div>
+          <h3>오류를 1개 이상 기록해 주세요</h3>
+          <p class="muted">다음 화면인 <b>우선순위화 → SBAR → 개인 성찰 → 결과</b>로 이동하려면 먼저 병실 번호를 눌러 발견한 오류를 기록해야 합니다.</p>
+          <ol>
+            <li>병실의 번호 표식을 누릅니다.</li>
+            <li>위치와 단서를 입력하고 <b>오류로 기록</b>을 누릅니다.</li>
+            <li>다시 <b>관찰 종료</b>를 누릅니다.</li>
+          </ol>
+          <div class="modal-actions"><button class="btn primary" id="continueRoom">병실에서 계속 찾기</button></div>
+        </div>`;
+      modal.classList.add('open');
+      const close = () => modal.classList.remove('open');
+      modal.querySelector('#mx').addEventListener('click', close);
+      modal.querySelector('#continueRoom').addEventListener('click', close);
+      modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+      return;
+    }
+    document.body.classList.remove('in-room');
     const labelOf = (id) => S.caseData.objects.find((o) => o.id === id)?.label || id;
     const chosen = new Set(S.session.priorities || []);
     app.innerHTML = `

@@ -343,6 +343,13 @@ textarea { resize: vertical; min-height: 60px; }
   position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
   font-size: 12px; font-weight: 600; color: rgba(234,248,247,.7);
 }
+.vr-guide {
+  position: absolute; top: 82px; left: 50%; transform: translateX(-50%); z-index: 29;
+  padding: 8px 13px; border: 1px solid rgba(120,224,218,.35); border-radius: 999px;
+  background: rgba(6,20,24,.72); color: #eaf8f7; backdrop-filter: blur(7px);
+  font-size: 11px; font-weight: 750; white-space: nowrap; pointer-events: none;
+}
+.vr-guide span { color: var(--aqua); }
 
 /* 좌하단 컨트롤 / 우하단 줌 */
 .vr-controls { position: absolute; left: 20px; bottom: 20px; z-index: 30; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -381,6 +388,14 @@ textarea { resize: vertical; min-height: 60px; }
   max-height: 88vh; overflow: auto;
 }
 .modal.inspect { max-width: 520px; }
+.finish-help { max-width: 480px; text-align: center; }
+.finish-help-icon {
+  width: 50px; height: 50px; margin: 0 auto 14px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--aqua); color: var(--aqua-deep); font-size: 20px; font-weight: 900;
+  box-shadow: 0 0 0 8px rgba(87,213,209,.12);
+}
+.finish-help ol { margin: 18px 0; padding-left: 24px; text-align: left; color: rgba(234,248,247,.84); }
+.finish-help li { margin: 8px 0; line-height: 1.55; }
 .modal-x { position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
 .modal-x:hover { color: var(--text); }
 .inspect-head { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; }
@@ -588,6 +603,7 @@ textarea { resize: vertical; min-height: 60px; }
   .vr-jump-btns { width: 100%; gap: 6px; }
   .vr-jbtn { width: 32px; height: 32px; font-size: 12px; }
   .vr-jump-hint { bottom: 42px; width: 100%; text-align: center; font-size: 10px; }
+  .vr-guide { top: 156px; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
   .vr-controls { left: 10px; right: 10px; bottom: 8px; gap: 5px; }
   .vr-ctl { padding: 8px 10px; font-size: 10px; }
   .vr-controls #ctlTilt, .vr-controls #ctlVR { display: none; }
