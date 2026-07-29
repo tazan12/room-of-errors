@@ -124,7 +124,7 @@
           <div class="eyebrow"><span class="dot-ico">◆</span> KYUNGMIN UNIVERSITY · 4 CASES · 2.5D VR</div>
           <h1>병실로 들어가 <span>숨은 환자안전 오류</span>를 찾으세요</h1>
           <p>조별로 병실을 관찰해 오류를 기록하고, 즉시 위해가 될 상위 5개를 우선순위화한 뒤 SBAR로 보고합니다.
-             총 4개 사례 · 사례당 18개 오류 · 100점 루브릭 자동/수동 채점.</p>
+             총 4개 사례 · 사례당 10개 오류 · 100점 루브릭 자동/수동 채점.</p>
         </div>
       </section>
       <div class="case-grid">
