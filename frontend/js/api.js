@@ -1,11 +1,12 @@
 /* 백엔드 REST API 클라이언트 */
 const API = (() => {
   const base = '';
-  let adminCode = localStorage.getItem('roe_admin') || '';
+  let accessToken = sessionStorage.getItem('roe_access_token') || '';
+  let currentUser = JSON.parse(sessionStorage.getItem('roe_user') || 'null');
 
   async function req(method, url, body) {
     const headers = { 'Content-Type': 'application/json' };
-    if (adminCode) headers['x-admin-code'] = adminCode;
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
     const opt = { method, headers };
     if (body !== undefined) opt.body = JSON.stringify(body);
     const r = await fetch(base + url, opt);
@@ -14,21 +15,30 @@ const API = (() => {
   }
 
   return {
-    /* 관리자 */
-    isAdmin: () => !!adminCode,
-    async adminLogin(code) {
-      const r = await fetch('/api/admin/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '로그인 실패');
-      adminCode = code; localStorage.setItem('roe_admin', code);
-      return true;
+    /* 인증 */
+    isLoggedIn: () => !!accessToken,
+    isAdmin: () => currentUser?.role === 'admin',
+    user: () => currentUser,
+    async login(email, password) {
+      const data = await req('POST', '/api/auth/login', { email, password });
+      accessToken = data.accessToken; currentUser = data.user;
+      sessionStorage.setItem('roe_access_token', accessToken);
+      sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
+      return currentUser;
     },
-    adminLogout() { adminCode = ''; localStorage.removeItem('roe_admin'); },
-    exportUrl(fmt, q = {}) {
-      const p = new URLSearchParams({ ...q, code: adminCode });
-      return `/api/export/scores.${fmt}?${p}`;
+    signup: (data) => req('POST', '/api/auth/signup', data),
+    async me() {
+      currentUser = await req('GET', '/api/auth/me');
+      sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
+      return currentUser;
+    },
+    logout() { accessToken = ''; currentUser = null; sessionStorage.removeItem('roe_access_token'); sessionStorage.removeItem('roe_user'); },
+    async downloadExport(fmt, q = {}) {
+      const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v));
+      const r = await fetch(`/api/export/scores.${fmt}?${p}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '내보내기 실패');
+      const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = `RoomOfErrors_scores.${fmt === 'html' ? 'html' : fmt}`; a.click(); URL.revokeObjectURL(url);
     },
 
     /* 사례·세션 */

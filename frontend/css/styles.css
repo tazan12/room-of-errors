@@ -103,6 +103,10 @@ a { color: var(--aqua); cursor: pointer; text-decoration: none; }
   background: var(--panel2); border: .8px solid var(--line2);
   border-radius: var(--card-radius); padding: 26px; box-shadow: var(--shadow); margin-bottom: 18px;
 }
+.auth-page { display: grid; min-height: calc(100vh - 110px); align-items: center; }
+.auth-panel { width: 100%; max-width: 480px; margin: 0 auto; }
+.signup-box { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+.signup-box summary { cursor: pointer; color: var(--aqua); font-size: 13px; font-weight: 700; margin-bottom: 14px; }
 .back { display: inline-block; margin-bottom: 12px; font-size: 13.5px; color: var(--muted); }
 .back:hover { color: var(--aqua); }
 

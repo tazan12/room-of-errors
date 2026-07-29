@@ -6,5 +6,7 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     envVars:
-      - key: ADMIN_CODE
-        sync: false        # Render 대시보드에서 관리자 코드를 직접 입력
+      - key: SUPABASE_URL
+        value: https://pvaunosbshlpuaqglirn.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_XmpLKAAS2eHiv2Iy5i98_A_lhfBRD-0

@@ -43,8 +43,53 @@
   const LS = 'roe_session';
   const saveLocal = () => S.session && localStorage.setItem(LS, S.session.id);
 
+  function viewLogin(mode = 'student') {
+    document.body.classList.remove('in-room');
+    const admin = mode === 'admin';
+    app.innerHTML = `
+      <div class="page-narrow auth-page">
+        <div class="panel auth-panel">
+          <div class="eyebrow"><span class="dot-ico">◆</span> ${admin ? 'ADMIN' : 'STUDENT'} ACCESS</div>
+          <h2>${admin ? '관리자 로그인' : '학생 로그인'}</h2>
+          <p class="muted">${admin ? '관리자 계정으로 로그인하면 전체 실습 기록과 채점 기능을 사용할 수 있습니다.' : '개인 실습 기록을 안전하게 저장하려면 로그인하세요.'}</p>
+          <div class="form-grid">
+            <label class="full">이메일<input id="authEmail" type="email" autocomplete="username" placeholder="name@example.com" /></label>
+            <label class="full">비밀번호<input id="authPassword" type="password" autocomplete="current-password" placeholder="8자 이상" /></label>
+          </div>
+          <button class="btn primary lg full" id="authLogin">로그인</button>
+          ${admin ? '' : `<details class="signup-box"><summary>처음 사용하는 학생인가요? 계정 만들기</summary>
+            <div class="form-grid">
+              <label>이름<input id="signupName" autocomplete="name" /></label>
+              <label>학번<input id="signupNumber" /></label>
+              <label class="full">반<input id="signupClass" placeholder="예: 4학년 A반" /></label>
+            </div>
+            <button class="btn ghost full" id="authSignup">학생 계정 만들기</button>
+          </details>`}
+        </div>
+      </div>`;
+    const login = async () => {
+      try {
+        const user = await API.login(app.querySelector('#authEmail').value.trim(), app.querySelector('#authPassword').value);
+        if (admin && user.role !== 'admin') { API.logout(); throw new Error('관리자 권한이 없는 계정입니다.'); }
+        refreshAdminNav(); admin ? viewProfessor() : viewHome();
+      } catch (e) { toast(e.message || '로그인 실패', 'warn'); }
+    };
+    app.querySelector('#authLogin').addEventListener('click', login);
+    if (!admin) app.querySelector('#authSignup').addEventListener('click', async () => {
+      try {
+        const result = await API.signup({
+          email: app.querySelector('#authEmail').value.trim(), password: app.querySelector('#authPassword').value,
+          fullName: app.querySelector('#signupName').value.trim(), studentNumber: app.querySelector('#signupNumber').value.trim(),
+          className: app.querySelector('#signupClass').value.trim(),
+        });
+        toast(result.needsEmailConfirmation ? '가입 완료 — 이메일 인증 후 로그인하세요' : '가입 완료 — 로그인해 주세요', 'ok');
+      } catch (e) { toast(e.message || '가입 실패', 'warn'); }
+    });
+  }
+
   /* ================= 화면: 홈(사례 선택) ================= */
   async function viewHome() {
+    if (!API.isLoggedIn()) return viewLogin('student');
     document.body.classList.remove('in-room');
     S.cases = await API.listCases();
     const themeName = { surgical: '수술·낙상', sepsis: '패혈증·격리', stroke: '뇌졸중·연하', diabetes: '당뇨·투약' };
@@ -82,6 +127,7 @@
     S.caseId = caseId;
     S.caseData = await API.getCase(caseId);
     const c = S.caseData;
+    const profile = API.user()?.profile || {};
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" data-route="home">← 사례 선택으로</a>
@@ -101,9 +147,9 @@
           </div>
           <h4>조 정보</h4>
           <div class="form-grid">
-            <label>반 <input id="f-class" placeholder="예: 1반" /></label>
+            <label>반 <input id="f-class" placeholder="예: 1반" value="${esc(profile.class_name || '')}" /></label>
             <label>조 이름 <input id="f-team" placeholder="예: 3조" /></label>
-            <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." /></label>
+            <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." value="${esc(profile.full_name || '')}" /></label>
           </div>
           <button class="btn primary lg" id="startBtn">병실 입장 →</button>
         </div>
@@ -583,27 +629,7 @@
     if (nav) nav.textContent = API.isAdmin() ? '관리자 ✓' : '관리자 모드';
   }
   function openAdminLogin() {
-    document.body.classList.remove('in-room');
-    app.innerHTML = `
-      <div class="page-narrow">
-        <div class="panel" style="max-width:420px;margin:60px auto;">
-          <div class="eyebrow"><span class="dot-ico">◆</span> ADMIN</div>
-          <h2>관리자 로그인</h2>
-          <p class="muted">채점 대시보드·데이터 내보내기는 관리자 전용입니다. 관리자 코드를 입력하세요.</p>
-          <div class="form-grid"><label class="full">관리자 코드
-            <input id="admCode" type="password" placeholder="관리자 코드" autofocus /></label></div>
-          <button class="btn primary lg full" id="admGo">로그인</button>
-          <p class="muted" style="font-size:12px;margin-top:12px;">기본 코드는 서버 환경변수 <code>ADMIN_CODE</code>로 설정합니다(기본값 roe-admin).</p>
-        </div>
-      </div>`;
-    const go = async () => {
-      try {
-        await API.adminLogin(app.querySelector('#admCode').value.trim());
-        refreshAdminNav(); toast('관리자 로그인 ✓', 'ok'); viewProfessor();
-      } catch (e) { toast(e.message || '로그인 실패', 'warn'); }
-    };
-    app.querySelector('#admGo').addEventListener('click', go);
-    app.querySelector('#admCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    viewLogin('admin');
   }
 
   /* ================= 화면: 관리자 대시보드 ================= */
@@ -612,7 +638,7 @@
     document.body.classList.remove('in-room');
     let rows;
     try { rows = await API.professorSessions(preCase ? { caseId: preCase } : {}); }
-    catch (e) { API.adminLogout(); refreshAdminNav(); return openAdminLogin(); }
+    catch (e) { API.logout(); refreshAdminNav(); return openAdminLogin(); }
     const q = preCase ? { caseId: preCase } : {};
     app.innerHTML = `
       <div class="page-wide">
@@ -649,12 +675,12 @@
         </table>
       </div>`;
     app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value));
-    app.querySelector('#admOut').addEventListener('click', () => { API.adminLogout(); refreshAdminNav(); viewHome(); });
+    app.querySelector('#admOut').addEventListener('click', () => { API.logout(); refreshAdminNav(); viewLogin('student'); });
     // 내보내기 링크(다운로드는 헤더를 못 실으므로 code를 쿼리로 전달)
-    app.querySelector('#exXlsx').href = API.exportUrl('xlsx', q);
-    app.querySelector('#exCsv').href = API.exportUrl('csv', q);
-    app.querySelector('#exDoc').href = API.exportUrl('doc', q);
-    app.querySelector('#exPdf').href = API.exportUrl('html', q);
+    [['exXlsx','xlsx'],['exCsv','csv'],['exDoc','doc'],['exPdf','html']].forEach(([id, fmt]) => {
+      const el = app.querySelector('#' + id); el.removeAttribute('href');
+      el.addEventListener('click', () => API.downloadExport(fmt, q).catch((e) => toast(e.message, 'warn')));
+    });
     bindProfRows();
 
     function rowHtml(r) {

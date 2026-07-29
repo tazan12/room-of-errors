@@ -12,9 +12,6 @@ COPY frontend ./frontend
 
 ENV PORT=3000
 ENV NODE_ENV=production
-# 운영 시 관리자 코드를 반드시 변경하세요.
-ENV ADMIN_CODE=roe-admin
-
 EXPOSE 3000
 WORKDIR /app/backend
 CMD ["node", "server.js"]

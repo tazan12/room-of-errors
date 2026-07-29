@@ -19,11 +19,9 @@
 const express = require('express');
 const path = require('path');
 const { CASES, RUBRIC } = require('./data/cases');
-const db = require('./store/db');
+const db = require('./store/supabase');
 const { autoScore, finalScore } = require('./scoring');
 const XP = require('./export');
-
-const ADMIN_CODE = process.env.ADMIN_CODE || 'roe-admin';   // 관리자 코드(환경변수로 변경 가능)
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -31,16 +29,29 @@ app.use(express.json({ limit: '1mb' }));
 // 정적 프론트엔드 서빙
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-/* 관리자 인증 미들웨어 — 헤더 x-admin-code 또는 쿼리 code 확인 */
+function bearer(req) {
+  const value = req.get('authorization') || '';
+  return value.startsWith('Bearer ') ? value.slice(7) : '';
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const token = bearer(req);
+    const identity = token && await db.getIdentity(token);
+    if (!identity) return res.status(401).json({ error: '로그인이 필요합니다.' });
+    req.auth = { token, ...identity };
+    next();
+  } catch (e) { res.status(401).json({ error: '인증 세션이 유효하지 않습니다.' }); }
+}
+
 function requireAdmin(req, res, next) {
-  const code = req.get('x-admin-code') || req.query.code;
-  if (code === ADMIN_CODE) return next();
-  return res.status(401).json({ error: 'admin authentication required' });
+  if (req.auth?.role === 'admin') return next();
+  return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 }
 
 /* 채점 행 생성(교수 대시보드·내보내기 공용) */
-function buildScoreRows(filter = {}) {
-  return db.listSessions(filter).map((s) => {
+async function buildScoreRows(token, filter = {}) {
+  return (await db.listSessions(token, filter)).map((s) => {
     const score = finalScore(s);
     return {
       id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName,
@@ -52,6 +63,28 @@ function buildScoreRows(filter = {}) {
     };
   });
 }
+
+/* ================= 인증 API ================= */
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { email, password, fullName, studentNumber, className } = req.body || {};
+    if (!email || !password || !fullName || !studentNumber) return res.status(400).json({ error: '이메일, 비밀번호, 이름, 학번을 입력하세요.' });
+    const data = await db.signUp({ email, password, fullName, studentNumber, className });
+    res.status(201).json({ session: data.session, needsEmailConfirmation: !data.session });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const data = await db.signIn(req.body || {});
+    const identity = await db.getIdentity(data.session.access_token);
+    res.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, role: identity.role, profile: identity.profile } });
+  } catch (e) { res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' }); }
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ id: req.auth.user.id, email: req.auth.user.email, role: req.auth.role, profile: req.auth.profile });
+});
 
 /* ---------- 유틸: 학생에게 노출할 사례 뷰(정답 숨김) ---------- */
 function publicCase(c) {
@@ -86,7 +119,7 @@ app.get('/api/cases/:id', (req, res) => {
   res.json(publicCase(c));
 });
 
-app.get('/api/cases/:id/answers', (req, res) => {
+app.get('/api/cases/:id/answers', requireAuth, (req, res) => {
   const c = CASES.find((x) => x.id === req.params.id.toUpperCase());
   if (!c) return res.status(404).json({ error: 'case not found' });
   res.json({
@@ -96,88 +129,76 @@ app.get('/api/cases/:id/answers', (req, res) => {
 });
 
 /* ================= 세션 API ================= */
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', requireAuth, async (req, res) => {
   const { caseId } = req.body || {};
   if (!CASES.find((c) => c.id === caseId)) {
     return res.status(400).json({ error: 'invalid caseId' });
   }
-  const s = db.createSession(req.body);
-  res.status(201).json(s);
+  try { res.status(201).json(await db.createSession(req.auth.token, req.auth.user.id, req.body)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get('/api/sessions/:id', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.get('/api/sessions/:id', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(s);
 });
 
-app.put('/api/sessions/:id/findings', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.put('/api/sessions/:id/findings', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   const findings = Array.isArray(req.body.findings) ? req.body.findings : [];
-  db.updateSession(s.id, { findings });
-  res.json(db.getSession(s.id));
+  res.json(await db.updateSession(req.auth.token, s.id, { findings }));
 });
 
-app.put('/api/sessions/:id/priorities', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.put('/api/sessions/:id/priorities', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  db.updateSession(s.id, { priorities: (req.body.priorities || []).slice(0, 5) });
-  res.json(db.getSession(s.id));
+  res.json(await db.updateSession(req.auth.token, s.id, { priorities: (req.body.priorities || []).slice(0, 5) }));
 });
 
-app.put('/api/sessions/:id/sbar', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.put('/api/sessions/:id/sbar', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  db.updateSession(s.id, { sbar: req.body.sbar || s.sbar });
-  res.json(db.getSession(s.id));
+  res.json(await db.updateSession(req.auth.token, s.id, { sbar: req.body.sbar || s.sbar }));
 });
 
-app.put('/api/sessions/:id/reflection', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.put('/api/sessions/:id/reflection', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  db.updateSession(s.id, { reflection: req.body.reflection || s.reflection });
-  res.json(db.getSession(s.id));
+  res.json(await db.updateSession(req.auth.token, s.id, { reflection: req.body.reflection || s.reflection }));
 });
 
-app.post('/api/sessions/:id/submit', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.post('/api/sessions/:id/submit', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  db.updateSession(s.id, { status: 'reporting', submittedAt: new Date().toISOString() });
-  res.json(db.getSession(s.id));
+  res.json(await db.updateSession(req.auth.token, s.id, { status: 'reporting', submittedAt: new Date().toISOString() }));
 });
 
-app.get('/api/sessions/:id/score', (req, res) => {
-  const s = db.getSession(req.params.id);
+app.get('/api/sessions/:id/score', requireAuth, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   res.json(finalScore(s));
 });
 
-app.put('/api/sessions/:id/manual', requireAdmin, (req, res) => {
-  const s = db.getSession(req.params.id);
+app.put('/api/sessions/:id/manual', requireAuth, requireAdmin, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   const manualScores = { ...s.manualScores, ...(req.body.manualScores || {}) };
-  db.updateSession(s.id, { manualScores, status: 'scored' });
-  res.json({ session: db.getSession(s.id), score: finalScore(db.getSession(s.id)) });
-});
-
-/* ================= 관리자 인증 ================= */
-app.post('/api/admin/login', (req, res) => {
-  const code = (req.body && req.body.code) || '';
-  if (code === ADMIN_CODE) return res.json({ ok: true });
-  res.status(401).json({ ok: false, error: '관리자 코드가 올바르지 않습니다.' });
+  const saved = await db.updateSession(req.auth.token, s.id, { manualScores, status: 'scored' });
+  res.json({ session: saved, score: finalScore(saved) });
 });
 
 /* ================= 교수(관리자) 대시보드 ================= */
-app.get('/api/professor/sessions', requireAdmin, (req, res) => {
+app.get('/api/professor/sessions', requireAuth, requireAdmin, async (req, res) => {
   const { caseId, className } = req.query;
-  res.json(buildScoreRows({ caseId, className }));
+  res.json(await buildScoreRows(req.auth.token, { caseId, className }));
 });
 
 /* ================= 내보내기 (관리자 전용) ================= */
-app.get('/api/export/scores.:fmt', requireAdmin, (req, res) => {
+app.get('/api/export/scores.:fmt', requireAuth, requireAdmin, async (req, res) => {
   const { caseId, className } = req.query;
-  const rows = buildScoreRows({ caseId, className });
+  const rows = await buildScoreRows(req.auth.token, { caseId, className });
   const title = 'Room of Errors 채점표' + (caseId ? ` · CASE ${caseId}` : '');
   const stamp = new Date().toISOString().slice(0, 10);
   const fname = `RoomOfErrors_scores_${stamp}`;
