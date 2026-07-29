@@ -1,5 +1,5 @@
 # Room of Errors — 프로덕션 컨테이너
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 
 # 의존성 설치(백엔드)
