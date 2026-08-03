@@ -95,6 +95,28 @@
     app.querySelector('#pendingOut').addEventListener('click', async () => { await API.logout(); refreshAdminNav(); viewLogin('student'); });
   }
 
+  function viewAdminAccountMismatch() {
+    const email = API.user()?.email || '';
+    app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
+      <div class="eyebrow"><span class="dot-ico">◆</span> ADMIN ACCESS</div>
+      <h2>관리자 계정이 아닙니다</h2>
+      <p class="muted">현재 로그인한 Google 계정에는 관리자 권한이 없습니다. 승인된 관리자 계정으로 다시 로그인해 주세요.</p>
+      <div class="patient-box"><b>${esc(email)}</b><p class="muted">현재 로그인된 계정</p></div>
+      <button class="btn primary lg full" id="switchAdminAccount">다른 Google 계정으로 다시 로그인</button>
+      <button class="btn ghost full" id="requestFacultyAccess">교수자 권한 신청</button>
+    </div></div>`;
+    app.querySelector('#switchAdminAccount').addEventListener('click', async () => {
+      try {
+        await API.logout();
+        await API.loginWithGoogle('admin');
+      } catch (e) { toast(e.message || 'Google 계정 전환 실패', 'warn'); }
+    });
+    app.querySelector('#requestFacultyAccess').addEventListener('click', async () => {
+      try { viewFacultyPending(await API.requestFacultyAccess()); }
+      catch (e) { toast(e.message || '교수자 권한 신청 실패', 'warn'); }
+    });
+  }
+
   function viewStudentPending(profile) {
     const rejected = profile?.approval_status === 'rejected';
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
@@ -790,8 +812,7 @@
     const mode = API.consumeLoginMode();
     if (mode === 'admin') {
       if (API.isAdmin()) return viewProfessor();
-      try { return viewFacultyPending(await API.requestFacultyAccess()); }
-      catch (e) { viewLogin('admin'); toast(e.message || '교수자 권한 신청 실패', 'warn'); return; }
+      return viewAdminAccountMismatch();
     }
     viewHome();
   }).catch(() => viewLogin('student'));

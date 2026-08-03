@@ -77,9 +77,12 @@ const API = (() => {
     async loginWithGoogle(mode = 'student') {
       if (!authClient) throw new Error('인증 서비스를 준비하는 중입니다.');
       sessionStorage.setItem('roe_login_mode', mode);
+      const queryParams = mode === 'admin'
+        ? { prompt: 'select_account', login_hint: 'jhk1223@kyungmin.ac.kr' }
+        : { prompt: 'select_account' };
       const { error } = await authClient.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${location.origin}/` },
+        options: { redirectTo: `${location.origin}/`, queryParams },
       });
       if (error) throw error;
     },
