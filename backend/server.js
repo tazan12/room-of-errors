@@ -275,18 +275,25 @@ app.put('/api/sessions/:id/manual', requireAuth, requireInstructor, async (req, 
 });
 
 app.post('/api/sessions/:id/manual/reset', requireAuth, requireAdmin, async (req, res) => {
-  const s = await db.getSession(req.auth.token, req.params.id);
-  if (!s) return res.status(404).json({ error: 'session not found' });
-  const saved = await db.updateSession(req.auth.token, s.id, {
-    findings: [],
-    priorities: [],
-    sbar: { s: '', b: '', a: '', r: '' },
-    reflection: {},
-    manualScores: {},
-    status: 'active',
-    submittedAt: null,
-  });
-  res.json({ session: saved, score: finalScore(saved) });
+  try {
+    const s = await db.getSession(req.auth.token, req.params.id);
+    if (!s) return res.status(404).json({ error: '초기화할 실습 기록을 찾지 못했습니다.' });
+    const saved = await db.updateSession(req.auth.token, s.id, {
+      findings: [],
+      priorities: [],
+      sbar: { s: '', b: '', a: '', r: '' },
+      reflection: {},
+      manualScores: {},
+      // roe_sessions_status_check permits exploring, reporting, and scored.
+      status: 'exploring',
+      submittedAt: null,
+    });
+    if (!saved) return res.status(404).json({ error: '실습 기록을 초기화하지 못했습니다.' });
+    res.json({ session: saved, score: finalScore(saved) });
+  } catch (e) {
+    console.error('[session reset] failed:', e?.message || e);
+    res.status(400).json({ error: `전체 실습·성적 초기화 실패: ${e?.message || '데이터베이스 저장 오류'}` });
+  }
 });
 
 /* ================= 교수(관리자) 대시보드 ================= */
