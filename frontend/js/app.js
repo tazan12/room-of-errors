@@ -71,27 +71,20 @@
     catch (e) { toast(e.message || '교수자 목록을 불러오지 못했습니다.', 'warn'); }
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
       <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT ROUTE</div>
-      <h2>학생 정보 및 담당 교수 선택</h2><p class="muted">본인의 지도교수와 분반을 선택하면 해당 교수자가 승인하고 채점합니다.</p>
+      <h2>학생 정보 및 분반 선택</h2><p class="muted">분반을 선택하면 해당 분반의 지도교수가 자동으로 배정됩니다.</p>
       <div class="form-grid">
         <label>이름<input id="profileName" autocomplete="name" value="${esc(profile.full_name || '')}" /></label>
         <label>학번<input id="profileNumber" inputmode="numeric" value="${esc(profile.student_number || '')}" /></label>
         <label>학년<select id="profileGrade"><option value="">선택</option>${[1,2,3,4].map((g) => `<option value="${g}" ${Number(profile.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
-        <label>지도교수<select id="profileFaculty"><option value="">선택</option>${routes.map((r) => `<option value="${r.user_id}" ${profile.faculty_user_id===r.user_id?'selected':''}>${esc(r.full_name || r.email)}</option>`).join('')}</select></label>
-        <label>분반<select id="profileClass"><option value="">지도교수를 먼저 선택하세요</option></select></label>
+        <label>분반<select id="profileClass"><option value="">선택</option>${routes.flatMap((r) => r.classes.map((c) => `<option value="${c}" ${profile.class_name===c?'selected':''}>${c} · ${esc(r.full_name || r.email)} 교수</option>`)).join('')}</select></label>
       </div><button class="btn primary lg full" id="saveProfile">저장하고 승인 요청</button>
       ${routes.length ? '' : '<p class="auth-note">현재 분반이 배정된 교수자가 없습니다. 총괄관리자에게 문의하세요.</p>'}
     </div></div>`;
-    const facultySelect = app.querySelector('#profileFaculty');
     const classSelect = app.querySelector('#profileClass');
-    const refreshClasses = () => {
-      const route = routes.find((r) => r.user_id === facultySelect.value);
-      classSelect.innerHTML = `<option value="">선택</option>${(route?.classes || []).map((c) => `<option value="${c}" ${profile.class_name===c?'selected':''}>${c}</option>`).join('')}`;
-    };
-    facultySelect.addEventListener('change', refreshClasses);
-    refreshClasses();
     app.querySelector('#saveProfile').addEventListener('click', async () => {
       try {
-        await API.updateProfile({ fullName: app.querySelector('#profileName').value.trim(), studentNumber: app.querySelector('#profileNumber').value.trim(), grade: app.querySelector('#profileGrade').value, facultyUserId: facultySelect.value, className: classSelect.value });
+        const route = routes.find((r) => r.classes.includes(classSelect.value));
+        await API.updateProfile({ fullName: app.querySelector('#profileName').value.trim(), studentNumber: app.querySelector('#profileNumber').value.trim(), grade: app.querySelector('#profileGrade').value, facultyUserId: route?.user_id || '', className: classSelect.value });
         await API.me(); toast('학생 정보와 담당 교수가 저장되었습니다.', 'ok'); viewHome();
       } catch (e) { toast(e.message || '학생 정보 저장 실패', 'warn'); }
     });
@@ -188,6 +181,7 @@
     S.caseData = await API.getCase(caseId);
     const c = S.caseData;
     const profile = API.user()?.profile || {};
+    const routes = (await API.facultyRoutes()).filter((r) => r.classes?.length);
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" data-route="home">← 사례 선택으로</a>
@@ -207,7 +201,7 @@
           </div>
           <h4>조 정보</h4>
           <div class="form-grid">
-            <label>반 <input id="f-class" placeholder="예: 1반" value="${esc(profile.class_name || '')}" /></label>
+            <label>분반 <select id="f-class"><option value="">선택</option>${routes.flatMap((r) => r.classes.map((name) => `<option value="${name}" ${profile.class_name===name?'selected':''}>${name} · ${esc(r.full_name || r.email)} 교수</option>`)).join('')}</select></label>
             <label>조 이름 <input id="f-team" placeholder="예: 3조" /></label>
             <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." value="${esc(profile.full_name || '')}" /></label>
           </div>
@@ -216,15 +210,20 @@
       </div>`;
     app.querySelector('[data-route="home"]').addEventListener('click', viewHome);
     app.querySelector('#startBtn').addEventListener('click', async () => {
-      const members = app.querySelector('#f-members').value.split(',').map((s) => s.trim()).filter(Boolean);
-      S.session = await API.createSession({
-        caseId,
-        className: app.querySelector('#f-class').value.trim(),
-        teamName: app.querySelector('#f-team').value.trim(),
-        members,
-      });
-      saveLocal();
-      viewRoom();
+      try {
+        const members = app.querySelector('#f-members').value.split(',').map((s) => s.trim()).filter(Boolean);
+        const className = app.querySelector('#f-class').value;
+        if (!className) return toast('분반을 선택하세요.', 'warn');
+        S.session = await API.createSession({
+          caseId,
+          className,
+          teamName: app.querySelector('#f-team').value.trim(),
+          members,
+        });
+        await API.me();
+        saveLocal();
+        viewRoom();
+      } catch (e) { toast(e.message || '병실 입장 준비 실패', 'warn'); }
     });
   }
 

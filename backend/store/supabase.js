@@ -20,6 +20,7 @@ function toSession(row) {
     studentUserId: row.student_user_id,
     caseId: row.case_id,
     className: row.class_name,
+    facultyUserId: row.faculty_user_id,
     teamName: row.team_name,
     members: row.members || [],
     status: row.status,
@@ -152,14 +153,23 @@ async function reviewStudentApproval(token, adminUserId, userId, decision) {
 }
 
 async function createSession(token, userId, data) {
-  const { data: profile, error: profileError } = await client(token).from('roe_profiles')
-    .select('class_name').eq('user_id', userId).single();
+  const sb = client(token);
+  const className = String(data.className || '').toUpperCase();
+  const { data: route, error: routeError } = await sb.from('roe_faculty_classes')
+    .select('faculty_user_id,class_name').eq('class_name', className).single();
+  if (routeError || !route) throw new Error('지도교수가 배정된 분반을 선택하세요.');
+  const { error: profileError } = await sb.from('roe_profiles').update({
+    class_name: route.class_name,
+    faculty_user_id: route.faculty_user_id,
+    updated_at: new Date().toISOString(),
+  }).eq('user_id', userId);
   if (profileError) throw profileError;
   const row = {
-    student_user_id: userId, case_id: data.caseId, class_name: profile.class_name,
+    student_user_id: userId, faculty_user_id: route.faculty_user_id,
+    case_id: data.caseId, class_name: route.class_name,
     team_name: data.teamName || '', members: data.members || [],
   };
-  const { data: saved, error } = await client(token).from('roe_sessions').insert(row).select().single();
+  const { data: saved, error } = await sb.from('roe_sessions').insert(row).select().single();
   if (error) throw error;
   return toSession(saved);
 }
