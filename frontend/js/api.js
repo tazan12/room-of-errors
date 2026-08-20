@@ -129,6 +129,7 @@ const API = (() => {
     submit: (id) => req('POST', `/api/sessions/${id}/submit`),
     getScore: (id) => req('GET', `/api/sessions/${id}/score`),
     saveManual: (id, manualScores) => req('PUT', `/api/sessions/${id}/manual`, { manualScores }),
+    resetManual: (id) => req('POST', `/api/sessions/${id}/manual/reset`),
     professorSessions: (q = {}) => {
       const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v));
       return req('GET', `/api/professor/sessions?${p}`);

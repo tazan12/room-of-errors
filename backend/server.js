@@ -259,6 +259,13 @@ app.put('/api/sessions/:id/manual', requireAuth, requireInstructor, async (req, 
   res.json({ session: saved, score: finalScore(saved) });
 });
 
+app.post('/api/sessions/:id/manual/reset', requireAuth, requireAdmin, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
+  if (!s) return res.status(404).json({ error: 'session not found' });
+  const saved = await db.updateSession(req.auth.token, s.id, { manualScores: {}, status: 'reporting' });
+  res.json({ session: saved, score: finalScore(saved) });
+});
+
 /* ================= 교수(관리자) 대시보드 ================= */
 app.get('/api/professor/sessions', requireAuth, requireInstructor, async (req, res) => {
   const { caseId, className } = req.query;

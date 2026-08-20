@@ -812,7 +812,7 @@
         <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
         <td>${man('priority',15)}</td><td>${man('sbar',15)}</td><td>${man('teamwork',10)}</td><td>${man('reflection',5)}</td>
         <td class="total"><b>${r.total ?? '-'}</b></td>
-        <td><button class="btn tiny" data-save="${r.id}">저장</button></td>
+        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">성적 초기화</button>` : ''}</td>
       </tr>`;
     }
     function bindProfRows() {
@@ -827,6 +827,16 @@
           const tr = app.querySelector(`tr[data-sid="${sid}"] .total b`);
           if (tr) tr.textContent = res.score.total;
           toast('채점 저장됨 ✓', 'ok');
+        });
+      });
+      app.querySelectorAll('[data-reset-score]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!window.confirm('이 실습 기록의 교수자 입력 점수를 초기화하시겠습니까? 학생 제출 내용은 유지됩니다.')) return;
+          try {
+            await API.resetManual(btn.dataset.resetScore);
+            toast('수동 채점 점수를 초기화했습니다.', 'ok');
+            viewProfessor(preCase, preClass);
+          } catch (e) { toast(e.message || '성적 초기화 실패', 'warn'); }
         });
       });
     }
