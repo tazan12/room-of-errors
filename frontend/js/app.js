@@ -733,7 +733,8 @@
           <h3>교수자 권한 신청</h3>
           ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
             <span><b>${esc(r.full_name || '이름 미등록')}</b><small>${esc(r.email)} · ${esc(r.status)}</small></span>
-            ${r.status === 'pending' ? `<span><button class="btn tiny" data-faculty="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected">거절</button></span>` : ''}
+            ${r.status === 'pending' ? `<span><button class="btn tiny" data-faculty="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected">거절</button></span>` :
+              (r.status === 'approved' && r.user_id !== API.user()?.id ? `<span><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected" data-revoke-faculty="true">권한 회수</button></span>` : '')}
           </div>`).join('') : '<p class="muted">새로운 교수자 신청이 없습니다.</p>'}
         </div>
         <div class="panel faculty-approval">
@@ -788,7 +789,12 @@
     });
     bindProfRows();
     app.querySelectorAll('[data-faculty]').forEach((btn) => btn.addEventListener('click', async () => {
-      try { await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : '신청을 거절했습니다.', 'ok'); viewProfessor(); }
+      if (btn.dataset.revokeFaculty && !window.confirm('이 교수자의 권한과 분반 배정을 회수할까요?\n배정된 학생은 새 지도교수를 선택한 후 다시 승인받아야 합니다.')) return;
+      try {
+        await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision);
+        toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : (btn.dataset.revokeFaculty ? '교수자 권한과 분반 배정을 회수했습니다.' : '신청을 거절했습니다.'), 'ok');
+        viewProfessor();
+      }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
     }));
     app.querySelectorAll('[data-save-classes]').forEach((btn) => btn.addEventListener('click', async () => {
