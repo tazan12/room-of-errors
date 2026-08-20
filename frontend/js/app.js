@@ -49,37 +49,50 @@
     app.innerHTML = `
       <div class="page-narrow auth-page">
         <div class="panel auth-panel">
-          <div class="eyebrow"><span class="dot-ico">◆</span> ${admin ? 'ADMIN' : 'STUDENT'} ACCESS</div>
-          <h2>${admin ? '관리자 로그인' : '학생 로그인'}</h2>
-          <p class="muted">${admin ? '학교에서 승인된 관리자 Google 계정만 전체 실습 기록과 채점 기능을 사용할 수 있습니다.' : '학교 Google 계정으로 안전하게 로그인하세요.'}</p>
-          <button class="btn google lg full" id="googleLogin"><span class="google-g">G</span> ${admin ? '승인된 관리자 계정으로 로그인' : 'Google 계정으로 계속하기'}</button>
-          ${admin ? '<p class="auth-note">관리자 권한은 서버의 이메일 허용목록으로 확인합니다.</p>' : `
-          <p class="auth-note">로그인 후 이름·학번·학년·반을 등록합니다.</p>`}
+          <div class="eyebrow"><span class="dot-ico">◆</span> ${admin ? 'INSTRUCTOR' : 'STUDENT'} ACCESS</div>
+          <h2>${admin ? '교수자 로그인' : '학생 로그인'}</h2>
+          <p class="muted">${admin ? '총괄관리자 또는 승인된 교수자 Google 계정으로 로그인하세요.' : '학교 Google 계정으로 안전하게 로그인하세요.'}</p>
+          <button class="btn google lg full" id="googleLogin"><span class="google-g">G</span> ${admin ? '교수자 계정으로 로그인' : 'Google 계정으로 계속하기'}</button>
+          ${admin ? '<p class="auth-note">신규 교수자는 로그인 후 총괄관리자에게 권한을 신청합니다.</p>' : `
+          <p class="auth-note">로그인 후 이름·학번·학년·지도교수·분반을 등록합니다.</p>`}
         </div>
       </div>`;
     app.querySelector('#googleLogin').addEventListener('click', () => API.loginWithGoogle(admin ? 'admin' : 'student').catch((e) => toast(e.message || 'Google 로그인 실패', 'warn')));
   }
 
   function profileComplete(profile) {
-    return !!(profile?.full_name && profile?.student_number && profile?.grade && profile?.class_name);
+    return !!(profile?.full_name && profile?.student_number && profile?.grade && profile?.class_name && profile?.faculty_user_id);
   }
 
-  function viewProfileSetup() {
+  async function viewProfileSetup() {
     const profile = API.user()?.profile || {};
+    let routes = [];
+    try { routes = (await API.facultyRoutes()).filter((r) => r.classes?.length); }
+    catch (e) { toast(e.message || '교수자 목록을 불러오지 못했습니다.', 'warn'); }
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
-      <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT PROFILE</div>
-      <h2>학생 정보 입력</h2><p class="muted">실습 기록 구분을 위해 최초 1회 입력합니다.</p>
+      <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT ROUTE</div>
+      <h2>학생 정보 및 담당 교수 선택</h2><p class="muted">본인의 지도교수와 분반을 선택하면 해당 교수자가 승인하고 채점합니다.</p>
       <div class="form-grid">
         <label>이름<input id="profileName" autocomplete="name" value="${esc(profile.full_name || '')}" /></label>
         <label>학번<input id="profileNumber" inputmode="numeric" value="${esc(profile.student_number || '')}" /></label>
         <label>학년<select id="profileGrade"><option value="">선택</option>${[1,2,3,4].map((g) => `<option value="${g}" ${Number(profile.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
-        <label>반<input id="profileClass" placeholder="예: A반 또는 1반" value="${esc(profile.class_name || '')}" /></label>
-      </div><button class="btn primary lg full" id="saveProfile">저장하고 시작하기</button>
+        <label>지도교수<select id="profileFaculty"><option value="">선택</option>${routes.map((r) => `<option value="${r.user_id}" ${profile.faculty_user_id===r.user_id?'selected':''}>${esc(r.full_name || r.email)}</option>`).join('')}</select></label>
+        <label>분반<select id="profileClass"><option value="">지도교수를 먼저 선택하세요</option></select></label>
+      </div><button class="btn primary lg full" id="saveProfile">저장하고 승인 요청</button>
+      ${routes.length ? '' : '<p class="auth-note">현재 분반이 배정된 교수자가 없습니다. 총괄관리자에게 문의하세요.</p>'}
     </div></div>`;
+    const facultySelect = app.querySelector('#profileFaculty');
+    const classSelect = app.querySelector('#profileClass');
+    const refreshClasses = () => {
+      const route = routes.find((r) => r.user_id === facultySelect.value);
+      classSelect.innerHTML = `<option value="">선택</option>${(route?.classes || []).map((c) => `<option value="${c}" ${profile.class_name===c?'selected':''}>${c}</option>`).join('')}`;
+    };
+    facultySelect.addEventListener('change', refreshClasses);
+    refreshClasses();
     app.querySelector('#saveProfile').addEventListener('click', async () => {
       try {
-        await API.updateProfile({ fullName: app.querySelector('#profileName').value.trim(), studentNumber: app.querySelector('#profileNumber').value.trim(), grade: app.querySelector('#profileGrade').value, className: app.querySelector('#profileClass').value.trim() });
-        await API.me(); toast('학생 정보가 저장되었습니다.', 'ok'); viewHome();
+        await API.updateProfile({ fullName: app.querySelector('#profileName').value.trim(), studentNumber: app.querySelector('#profileNumber').value.trim(), grade: app.querySelector('#profileGrade').value, facultyUserId: facultySelect.value, className: classSelect.value });
+        await API.me(); toast('학생 정보와 담당 교수가 저장되었습니다.', 'ok'); viewHome();
       } catch (e) { toast(e.message || '학생 정보 저장 실패', 'warn'); }
     });
   }
@@ -88,7 +101,7 @@
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
       <div class="eyebrow"><span class="dot-ico">◆</span> FACULTY ACCESS</div>
       <h2>교수자 승인 대기</h2>
-      <p class="muted">관리자에게 교수자 권한 신청을 전달했습니다. 승인 후 관리자 모드로 다시 로그인해 주세요.</p>
+      <p class="muted">총괄관리자에게 교수자 권한 신청을 전달했습니다. 승인 후 로그아웃하고 교수자 모드로 다시 로그인해 주세요.</p>
       <div class="patient-box"><b>${esc(API.user()?.email || '')}</b><p class="muted">신청 상태: ${esc(request?.status || 'pending')}</p></div>
       <button class="btn ghost full" id="pendingOut">로그아웃</button>
     </div></div>`;
@@ -98,9 +111,9 @@
   function viewAdminAccountMismatch() {
     const email = API.user()?.email || '';
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
-      <div class="eyebrow"><span class="dot-ico">◆</span> ADMIN ACCESS</div>
-      <h2>관리자 계정이 아닙니다</h2>
-      <p class="muted">현재 로그인한 Google 계정에는 관리자 권한이 없습니다. 승인된 관리자 계정으로 다시 로그인해 주세요.</p>
+      <div class="eyebrow"><span class="dot-ico">◆</span> INSTRUCTOR ACCESS</div>
+      <h2>교수자 권한이 필요합니다</h2>
+      <p class="muted">현재 Google 계정은 아직 교수자로 승인되지 않았습니다. 권한을 신청하거나 다른 교수자 계정으로 로그인해 주세요.</p>
       <div class="patient-box"><b>${esc(email)}</b><p class="muted">현재 로그인된 계정</p></div>
       <button class="btn primary lg full" id="switchAdminAccount">다른 Google 계정으로 다시 로그인</button>
       <button class="btn ghost full" id="requestFacultyAccess">교수자 권한 신청</button>
@@ -122,7 +135,7 @@
     app.innerHTML = `<div class="page-narrow auth-page"><div class="panel auth-panel">
       <div class="eyebrow"><span class="dot-ico">◆</span> STUDENT APPROVAL</div>
       <h2>${rejected ? '학생 사용 신청이 거절되었습니다' : '학생 사용 승인 대기 중'}</h2>
-      <p class="muted">${rejected ? '입력한 정보를 확인한 뒤 담당 관리자에게 문의해 주세요.' : '학생 정보가 제출되었습니다. 관리자가 승인하면 사례 선택과 병실 입장이 가능합니다.'}</p>
+      <p class="muted">${rejected ? '입력한 정보를 확인한 뒤 담당 교수자에게 문의해 주세요.' : '학생 정보가 제출되었습니다. 담당 교수자가 승인하면 사례 선택과 병실 입장이 가능합니다.'}</p>
       <div class="patient-box">
         <b>${esc(profile?.full_name || '')} · ${esc(profile?.student_number || '')}</b>
         <p class="muted">${esc(profile?.grade || '')}학년 · ${esc(profile?.class_name || '')} · 상태: ${rejected ? '거절' : '승인 대기'}</p>
@@ -135,8 +148,8 @@
   /* ================= 화면: 홈(사례 선택) ================= */
   async function viewHome() {
     if (!API.isLoggedIn()) return viewLogin('student');
-    if (!API.isAdmin() && !profileComplete(API.user()?.profile)) return viewProfileSetup();
-    if (!API.isAdmin() && API.user()?.profile?.approval_status !== 'approved') return viewStudentPending(API.user()?.profile);
+    if (!API.isInstructor() && !profileComplete(API.user()?.profile)) return viewProfileSetup();
+    if (!API.isInstructor() && API.user()?.profile?.approval_status !== 'approved') return viewStudentPending(API.user()?.profile);
     document.body.classList.remove('in-room');
     S.cases = await API.listCases();
     const themeName = { surgical: '수술·낙상', sepsis: '패혈증·격리', stroke: '뇌졸중·연하', diabetes: '당뇨·투약' };
@@ -673,34 +686,37 @@
   /* ---------- 관리자 로그인 ---------- */
   function refreshAdminNav() {
     const nav = document.getElementById('adminNav');
-    if (nav) nav.textContent = API.isAdmin() ? '관리자 ✓' : '관리자 모드';
+    if (nav) nav.textContent = API.isAdmin() ? '총괄관리자 ✓' : (API.isInstructor() ? '교수자 ✓' : '교수자 로그인');
   }
   function openAdminLogin() {
     viewLogin('admin');
   }
 
   /* ================= 화면: 관리자 대시보드 ================= */
-  async function viewProfessor(preCase) {
-    if (!API.isAdmin()) return openAdminLogin();
+  async function viewProfessor(preCase, preClass) {
+    if (!API.isInstructor()) return openAdminLogin();
     document.body.classList.remove('in-room');
-    const [sessionsResult, facultyResult, studentsResult] = await Promise.allSettled([
-      API.professorSessions(preCase ? { caseId: preCase } : {}),
-      API.facultyRequests(),
+    const [sessionsResult, facultyResult, studentsResult, routesResult] = await Promise.allSettled([
+      API.professorSessions({ ...(preCase ? { caseId: preCase } : {}), ...(preClass ? { className: preClass } : {}) }),
+      API.isAdmin() ? API.facultyRequests() : Promise.resolve([]),
       API.studentApprovals(),
+      API.facultyRoutes(),
     ]);
     const rows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
     const facultyRequests = facultyResult.status === 'fulfilled' ? facultyResult.value : [];
     const studentApprovals = studentsResult.status === 'fulfilled' ? studentsResult.value : [];
+    const facultyRoutes = routesResult.status === 'fulfilled' ? routesResult.value : [];
+    const classNames = ['A1','B1','C1','D1','A2','B2','C2','D2'];
     const loadWarnings = [
       sessionsResult.status === 'rejected' ? `학생 실습 기록: ${sessionsResult.reason?.message || '불러오기 실패'}` : '',
       facultyResult.status === 'rejected' ? `교수자 승인 요청: ${facultyResult.reason?.message || '불러오기 실패'}` : '',
       studentsResult.status === 'rejected' ? `학생 승인 요청: ${studentsResult.reason?.message || '불러오기 실패'}` : '',
     ].filter(Boolean);
-    const q = preCase ? { caseId: preCase } : {};
+    const q = { ...(preCase ? { caseId: preCase } : {}), ...(preClass ? { className: preClass } : {}) };
     app.innerHTML = `
       <div class="page-wide">
         <div class="result-head">
-          <h2>관리자 대시보드</h2>
+          <h2>${API.isAdmin() ? '총괄관리자 대시보드' : '교수자 대시보드'}</h2>
           <div>
             <button class="btn primary" id="adminCases">사례 선택 · 병실 입장</button>
             <button class="btn ghost" id="admOut">로그아웃</button>
@@ -710,17 +726,24 @@
         <div class="panel faculty-approval">
           <h3>학생 사용 승인</h3>
           ${studentApprovals.length ? studentApprovals.map((r) => `<div class="faculty-row">
-            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · ${esc(r.approval_status)}</small></span>
+            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(r.approval_status)}</small></span>
             <span><button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button></span>
           </div>`).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
         </div>
-        <div class="panel faculty-approval">
+        ${API.isAdmin() ? `<div class="panel faculty-approval">
           <h3>교수자 권한 신청</h3>
           ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
             <span><b>${esc(r.full_name || '이름 미등록')}</b><small>${esc(r.email)} · ${esc(r.status)}</small></span>
             ${r.status === 'pending' ? `<span><button class="btn tiny" data-faculty="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected">거절</button></span>` : ''}
           </div>`).join('') : '<p class="muted">새로운 교수자 신청이 없습니다.</p>'}
         </div>
+        <div class="panel faculty-approval">
+          <h3>교수자 분반 배정 <small class="muted">교수자당 최대 2개</small></h3>
+          ${facultyRoutes.length ? facultyRoutes.map((r) => `<div class="faculty-row faculty-assignment">
+            <span><b>${esc(r.full_name || r.email)}</b><small>${esc(r.email)}</small></span>
+            <span class="class-checks">${classNames.map((c) => `<label><input type="checkbox" data-class-for="${r.user_id}" value="${c}" ${r.classes.includes(c)?'checked':''}>${c}</label>`).join('')}<button class="btn tiny" data-save-classes="${r.user_id}">배정 저장</button></span>
+          </div>`).join('') : '<p class="muted">승인된 교수자가 없습니다.</p>'}
+        </div>` : ''}
         <div class="export-bar">
           <span class="muted">데이터 내보내기:</span>
           <a class="btn tiny" id="exXlsx">📊 Excel(.xlsx)</a>
@@ -736,6 +759,12 @@
               ${['A','B','C','D'].map((x) => `<option value="${x}" ${preCase===x?'selected':''}>CASE ${x}</option>`).join('')}
             </select>
           </label>
+          <label>분반
+            <select id="pf-class">
+              <option value="">전체</option>
+              ${classNames.map((x) => `<option value="${x}" ${preClass===x?'selected':''}>${x}</option>`).join('')}
+            </select>
+          </label>
           <span class="muted">${rows.length}개 조 세션</span>
         </div>
         <table class="prof-table">
@@ -749,7 +778,8 @@
           </tbody>
         </table>
       </div>`;
-    app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value));
+    app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value, app.querySelector('#pf-class').value));
+    app.querySelector('#pf-class').addEventListener('change', (e) => viewProfessor(app.querySelector('#pf-case').value, e.target.value));
     app.querySelector('#adminCases').addEventListener('click', viewHome);
     app.querySelector('#admOut').addEventListener('click', () => { API.logout(); refreshAdminNav(); viewLogin('student'); });
     // 내보내기 링크(다운로드는 헤더를 못 실으므로 code를 쿼리로 전달)
@@ -761,6 +791,12 @@
     app.querySelectorAll('[data-faculty]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : '신청을 거절했습니다.', 'ok'); viewProfessor(); }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-save-classes]').forEach((btn) => btn.addEventListener('click', async () => {
+      const selected = [...app.querySelectorAll(`[data-class-for="${btn.dataset.saveClasses}"]:checked`)].map((x) => x.value);
+      if (selected.length > 2) return toast('교수자당 최대 2개 분반만 배정할 수 있습니다.', 'warn');
+      try { await API.assignFacultyClasses(btn.dataset.saveClasses, selected); toast('담당 분반을 저장했습니다.', 'ok'); viewProfessor(preCase, preClass); }
+      catch (e) { toast(e.message || '분반 배정 실패', 'warn'); }
     }));
     app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
@@ -801,7 +837,7 @@
     b.addEventListener('click', () => {
       const r = b.dataset.route;
       if (r === 'home') viewHome();
-      else if (r === 'professor') { API.isAdmin() ? viewProfessor() : openAdminLogin(); }
+      else if (r === 'professor') { API.isInstructor() ? viewProfessor() : openAdminLogin(); }
     }));
   document.getElementById('homeBtn').addEventListener('click', viewHome);
   refreshAdminNav();
@@ -811,7 +847,7 @@
     refreshAdminNav();
     const mode = API.consumeLoginMode();
     if (mode === 'admin') {
-      if (API.isAdmin()) return viewProfessor();
+      if (API.isInstructor()) return viewProfessor();
       return viewAdminAccountMismatch();
     }
     viewHome();

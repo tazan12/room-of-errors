@@ -46,7 +46,7 @@ const API = (() => {
         currentUser = {
           id: sessionUser.id,
           email: sessionUser.email,
-          role: sessionUser.app_metadata?.role === 'admin' ? 'admin' : 'student',
+          role: ['admin', 'faculty'].includes(sessionUser.app_metadata?.role) ? sessionUser.app_metadata.role : 'student',
           profile: null,
         };
         sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
@@ -57,7 +57,7 @@ const API = (() => {
         }
         // Auth app metadata is issued by the server and is sufficient to route
         // an administrator even if the profile endpoint is temporarily delayed.
-        if (lastError && currentUser.role !== 'admin') throw lastError;
+        if (lastError && !['admin', 'faculty'].includes(currentUser.role)) throw lastError;
       } else {
         // Never route from stale sessionStorage data after a server-side logout.
         clearCachedAuth();
@@ -66,6 +66,7 @@ const API = (() => {
     },
     isLoggedIn: () => !!accessToken,
     isAdmin: () => currentUser?.role === 'admin',
+    isInstructor: () => ['admin', 'faculty'].includes(currentUser?.role),
     user: () => currentUser,
     async login(email, password) {
       const data = await req('POST', '/api/auth/login', { email, password });
@@ -77,9 +78,7 @@ const API = (() => {
     async loginWithGoogle(mode = 'student') {
       if (!authClient) throw new Error('인증 서비스를 준비하는 중입니다.');
       sessionStorage.setItem('roe_login_mode', mode);
-      const queryParams = mode === 'admin'
-        ? { prompt: 'select_account', login_hint: 'jhk1223@kyungmin.ac.kr' }
-        : { prompt: 'select_account' };
+      const queryParams = { prompt: 'select_account' };
       const { error } = await authClient.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: `${location.origin}/`, queryParams },
@@ -93,8 +92,10 @@ const API = (() => {
     },
     updateProfile: (data) => req('PUT', '/api/auth/profile', data),
     requestFacultyAccess: () => req('POST', '/api/faculty/request'),
+    facultyRoutes: () => req('GET', '/api/faculty/routes'),
     facultyRequests: () => req('GET', '/api/admin/faculty-requests'),
     reviewFaculty: (userId, decision) => req('PUT', `/api/admin/faculty-requests/${userId}`, { decision }),
+    assignFacultyClasses: (userId, classes) => req('PUT', `/api/admin/faculty-assignments/${userId}`, { classes }),
     studentApprovals: () => req('GET', '/api/admin/student-approvals'),
     reviewStudent: (userId, decision) => req('PUT', `/api/admin/student-approvals/${userId}`, { decision }),
     async me() {

@@ -17,6 +17,7 @@ function toSession(row) {
   if (!row) return null;
   return {
     id: row.id,
+    studentUserId: row.student_user_id,
     caseId: row.case_id,
     className: row.class_name,
     teamName: row.team_name,
@@ -55,7 +56,9 @@ async function getIdentity(token) {
   return {
     user,
     profile,
-    role: user.app_metadata?.role === 'admin' || profile?.role === 'admin' ? 'admin' : 'student',
+    role: ['admin', 'faculty'].includes(user.app_metadata?.role)
+      ? user.app_metadata.role
+      : (['admin', 'faculty'].includes(profile?.role) ? profile.role : 'student'),
   };
 }
 
@@ -74,12 +77,13 @@ async function signIn({ email, password }) {
   return data;
 }
 
-async function updateProfile(token, userId, { fullName, studentNumber, grade, className }) {
+async function updateProfile(token, userId, { fullName, studentNumber, grade, className, facultyUserId }) {
   const row = {
     full_name: fullName,
     student_number: studentNumber,
     grade,
     class_name: className,
+    faculty_user_id: facultyUserId,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await client(token).from('roe_profiles').update(row).eq('user_id', userId).select().single();
@@ -102,6 +106,23 @@ async function listFacultyRequests(token) {
   return data || [];
 }
 
+async function listFacultyRoutes(token) {
+  const sb = client(token);
+  const [{ data: faculty, error: facultyError }, { data: classes, error: classError }] = await Promise.all([
+    sb.from('roe_faculty_requests').select('user_id,email,full_name,status').eq('status', 'approved').order('full_name'),
+    sb.from('roe_faculty_classes').select('faculty_user_id,class_name').order('class_name'),
+  ]);
+  if (facultyError) throw facultyError;
+  if (classError) throw classError;
+  return (faculty || []).map((f) => ({ ...f, classes: (classes || []).filter((c) => c.faculty_user_id === f.user_id).map((c) => c.class_name) }));
+}
+
+async function assignFacultyClasses(token, userId, classes) {
+  const { data, error } = await client(token).rpc('roe_assign_faculty_classes', { target_user_id: userId, class_names: classes });
+  if (error) throw error;
+  return data || [];
+}
+
 async function reviewFacultyRequest(token, userId, decision) {
   const { data, error } = await client(token).rpc('roe_review_faculty', { target_user_id: userId, decision });
   if (error) throw error;
@@ -110,7 +131,7 @@ async function reviewFacultyRequest(token, userId, decision) {
 
 async function listStudentApprovals(token) {
   const { data, error } = await client(token).from('roe_profiles')
-    .select('user_id,full_name,student_number,grade,class_name,approval_status,created_at,approved_at')
+    .select('user_id,full_name,student_number,grade,class_name,faculty_user_id,approval_status,created_at,approved_at')
     .eq('role', 'student').order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -131,8 +152,11 @@ async function reviewStudentApproval(token, adminUserId, userId, decision) {
 }
 
 async function createSession(token, userId, data) {
+  const { data: profile, error: profileError } = await client(token).from('roe_profiles')
+    .select('class_name').eq('user_id', userId).single();
+  if (profileError) throw profileError;
   const row = {
-    student_user_id: userId, case_id: data.caseId, class_name: data.className || '',
+    student_user_id: userId, case_id: data.caseId, class_name: profile.class_name,
     team_name: data.teamName || '', members: data.members || [],
   };
   const { data: saved, error } = await client(token).from('roe_sessions').insert(row).select().single();
@@ -165,4 +189,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, createSession, getSession, updateSession, listSessions };

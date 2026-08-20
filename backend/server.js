@@ -52,8 +52,13 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 }
 
+function requireInstructor(req, res, next) {
+  if (['admin', 'faculty'].includes(req.auth?.role)) return next();
+  return res.status(403).json({ error: '교수자 권한이 필요합니다.' });
+}
+
 function requireApproved(req, res, next) {
-  if (req.auth?.role === 'admin' || req.auth?.profile?.approval_status === 'approved') return next();
+  if (['admin', 'faculty'].includes(req.auth?.role) || req.auth?.profile?.approval_status === 'approved') return next();
   return res.status(403).json({ error: '관리자 승인 후 사용할 수 있습니다.' });
 }
 
@@ -91,11 +96,13 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 
 app.put('/api/auth/profile', requireAuth, async (req, res) => {
   try {
-    if (req.auth.role === 'admin') return res.status(403).json({ error: '학생 계정만 학생 정보를 수정할 수 있습니다.' });
-    const { fullName, studentNumber, grade, className } = req.body || {};
-    if (!fullName || !studentNumber || !grade || !className) return res.status(400).json({ error: '이름, 학번, 학년, 반을 모두 입력하세요.' });
+    if (['admin', 'faculty'].includes(req.auth.role)) return res.status(403).json({ error: '학생 계정만 학생 정보를 수정할 수 있습니다.' });
+    const { fullName, studentNumber, grade, className, facultyUserId } = req.body || {};
+    if (!fullName || !studentNumber || !grade || !className || !facultyUserId) return res.status(400).json({ error: '이름, 학번, 학년, 지도교수, 분반을 모두 입력하세요.' });
     if (!['1', '2', '3', '4'].includes(String(grade))) return res.status(400).json({ error: '학년을 올바르게 선택하세요.' });
-    const profile = await db.updateProfile(req.auth.token, req.auth.user.id, { fullName, studentNumber, grade: Number(grade), className });
+    const routes = await db.listFacultyRoutes(req.auth.token);
+    if (!routes.some((r) => r.user_id === facultyUserId && r.classes.includes(className))) return res.status(400).json({ error: '지도교수에게 배정된 분반을 선택하세요.' });
+    const profile = await db.updateProfile(req.auth.token, req.auth.user.id, { fullName, studentNumber, grade: Number(grade), className, facultyUserId });
     res.json(profile);
   } catch (e) {
     const duplicate = e.code === '23505' || /duplicate|unique/i.test(e.message || '');
@@ -107,6 +114,19 @@ app.post('/api/faculty/request', requireAuth, async (req, res) => {
   try {
     if (req.auth.role === 'admin') return res.json({ status: 'approved' });
     res.status(201).json(await db.requestFacultyAccess(req.auth.token, req.auth));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/faculty/routes', requireAuth, async (req, res) => {
+  try { res.json(await db.listFacultyRoutes(req.auth.token)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put('/api/admin/faculty-assignments/:userId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const classes = Array.isArray(req.body?.classes) ? [...new Set(req.body.classes)] : [];
+    if (classes.length > 2) return res.status(400).json({ error: '교수자당 최대 2개 분반만 배정할 수 있습니다.' });
+    res.json(await db.assignFacultyClasses(req.auth.token, req.params.userId, classes));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -123,12 +143,12 @@ app.put('/api/admin/faculty-requests/:userId', requireAuth, requireAdmin, async 
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get('/api/admin/student-approvals', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/admin/student-approvals', requireAuth, requireInstructor, async (req, res) => {
   try { res.json(await db.listStudentApprovals(req.auth.token)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.put('/api/admin/student-approvals/:userId', requireAuth, requireAdmin, async (req, res) => {
+app.put('/api/admin/student-approvals/:userId', requireAuth, requireInstructor, async (req, res) => {
   try {
     const decision = req.body?.decision;
     if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: '승인 또는 거절을 선택하세요.' });
@@ -231,7 +251,7 @@ app.get('/api/sessions/:id/score', requireAuth, requireApproved, async (req, res
   res.json(finalScore(s));
 });
 
-app.put('/api/sessions/:id/manual', requireAuth, requireAdmin, async (req, res) => {
+app.put('/api/sessions/:id/manual', requireAuth, requireInstructor, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
   const manualScores = { ...s.manualScores, ...(req.body.manualScores || {}) };
@@ -240,13 +260,13 @@ app.put('/api/sessions/:id/manual', requireAuth, requireAdmin, async (req, res) 
 });
 
 /* ================= 교수(관리자) 대시보드 ================= */
-app.get('/api/professor/sessions', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/professor/sessions', requireAuth, requireInstructor, async (req, res) => {
   const { caseId, className } = req.query;
   res.json(await buildScoreRows(req.auth.token, { caseId, className }));
 });
 
 /* ================= 내보내기 (관리자 전용) ================= */
-app.get('/api/export/scores.:fmt', requireAuth, requireAdmin, async (req, res) => {
+app.get('/api/export/scores.:fmt', requireAuth, requireInstructor, async (req, res) => {
   const { caseId, className } = req.query;
   const rows = await buildScoreRows(req.auth.token, { caseId, className });
   const title = 'Room of Errors 채점표' + (caseId ? ` · CASE ${caseId}` : '');

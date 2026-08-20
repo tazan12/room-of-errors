@@ -534,6 +534,14 @@ textarea { resize: vertical; min-height: 60px; }
 .faculty-row:first-of-type { border-top: 0; }
 .faculty-row small { display: block; margin-top: 3px; color: var(--muted); }
 .faculty-row > span:last-child { display: flex; gap: 6px; }
+.faculty-assignment { align-items: flex-start; }
+.class-checks { flex-wrap: wrap; justify-content: flex-end; max-width: 620px; }
+.class-checks label { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
+.class-checks input { accent-color: var(--aqua); }
+@media (max-width: 720px) {
+  .faculty-row, .faculty-assignment { align-items: stretch; flex-direction: column; }
+  .faculty-row > span:last-child, .class-checks { justify-content: flex-start; max-width: none; }
+}
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 900px) {
