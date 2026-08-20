@@ -26,8 +26,16 @@ const XP = require('./export');
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
-// 정적 프론트엔드 서빙
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
+// Always revalidate UI assets so a new Render deploy is visible immediately.
+app.use(express.static(path.join(__dirname, '..', 'frontend'), {
+  etag: true,
+  maxAge: 0,
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  },
+}));
 
 function bearer(req) {
   const value = req.get('authorization') || '';
@@ -309,6 +317,7 @@ app.get('/api/export/scores.:fmt', requireAuth, requireInstructor, async (req, r
 
 /* ---------- SPA fallback ---------- */
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
 });
 

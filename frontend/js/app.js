@@ -776,7 +776,7 @@
           <thead><tr>
             <th>사례</th><th>반</th><th>조</th><th>탐지</th><th>고위험</th>
             <th>탐지40</th><th>고위험15</th><th>우선15</th><th>SBAR15</th><th>팀10</th><th>성찰5</th>
-            <th>총점</th><th></th>
+            <th>총점</th><th>채점 관리</th>
           </tr></thead>
           <tbody id="pf-body">
             ${rows.map(rowHtml).join('') || '<tr><td colspan="13" class="muted">세션이 없습니다.</td></tr>'}
@@ -833,7 +833,7 @@
         <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
         <td>${man('priority',15)}</td><td>${man('sbar',15)}</td><td>${man('teamwork',10)}</td><td>${man('reflection',5)}</td>
         <td class="total"><b>${r.total ?? '-'}</b></td>
-        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">성적 초기화</button>` : ''}</td>
+        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">성적 입력 초기화</button>` : ''}</td>
       </tr>`;
     }
     function bindProfRows() {
