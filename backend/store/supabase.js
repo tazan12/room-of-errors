@@ -152,6 +152,29 @@ async function reviewStudentApproval(token, adminUserId, userId, decision) {
   return data;
 }
 
+async function manageStudentRoute(token, adminUserId, userId, className) {
+  const sb = client(token);
+  if (!className) {
+    const { data, error } = await sb.from('roe_profiles').update({
+      class_name: null, faculty_user_id: null, approval_status: 'pending',
+      approved_at: null, approved_by: null, updated_at: new Date().toISOString(),
+    }).eq('user_id', userId).eq('role', 'student').select().single();
+    if (error) throw error;
+    return data;
+  }
+  const normalized = String(className).toUpperCase();
+  const { data: route, error: routeError } = await sb.from('roe_faculty_classes')
+    .select('faculty_user_id,class_name').eq('class_name', normalized).single();
+  if (routeError || !route) throw new Error('지도교수가 배정된 분반을 선택하세요.');
+  const { data, error } = await sb.from('roe_profiles').update({
+    class_name: route.class_name, faculty_user_id: route.faculty_user_id,
+    approval_status: 'approved', approved_at: new Date().toISOString(),
+    approved_by: adminUserId, updated_at: new Date().toISOString(),
+  }).eq('user_id', userId).eq('role', 'student').select().single();
+  if (error) throw error;
+  return data;
+}
+
 async function createSession(token, userId, data) {
   const sb = client(token);
   const className = String(data.className || '').toUpperCase();
@@ -199,4 +222,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, createSession, getSession, updateSession, listSessions };

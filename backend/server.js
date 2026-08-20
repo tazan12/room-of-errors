@@ -156,6 +156,13 @@ app.put('/api/admin/student-approvals/:userId', requireAuth, requireInstructor, 
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+app.put('/api/admin/students/:userId/route', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const className = req.body?.className || '';
+    res.json(await db.manageStudentRoute(req.auth.token, req.auth.user.id, req.params.userId, className));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 /* ---------- 유틸: 학생에게 노출할 사례 뷰(정답 숨김) ---------- */
 function publicCase(c) {
   return {

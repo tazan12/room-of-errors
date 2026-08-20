@@ -153,6 +153,7 @@
           <h1>병실로 들어가 <span>숨은 환자안전 오류</span>를 찾으세요</h1>
           <p>조별로 병실을 관찰해 오류를 기록하고, 즉시 위해가 될 상위 5개를 우선순위화한 뒤 SBAR로 보고합니다.
              총 4개 사례 · 사례당 10개 오류 · 100점 루브릭 자동/수동 채점.</p>
+          ${!API.isInstructor() ? `<button class="btn ghost" id="editStudentProfile">내 정보·분반 변경</button>` : ''}
         </div>
       </section>
       <div class="case-grid">
@@ -173,6 +174,7 @@
       </div>`;
     app.querySelectorAll('[data-case]').forEach((b) =>
       b.addEventListener('click', () => viewIntake(b.dataset.case)));
+    app.querySelector('#editStudentProfile')?.addEventListener('click', viewProfileSetup);
   }
 
   /* ================= 화면: 조 정보 입력 ================= */
@@ -726,7 +728,10 @@
           <h3>학생 사용 승인</h3>
           ${studentApprovals.length ? studentApprovals.map((r) => `<div class="faculty-row">
             <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(r.approval_status)}</small></span>
-            <span><button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button></span>
+            <span>
+              ${API.isAdmin() ? `<select data-student-class="${r.user_id}"><option value="">분반 선택</option>${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c}</option>`).join('')}</select><button class="btn tiny" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
+              <button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>
+            </span>
           </div>`).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
         </div>
         ${API.isAdmin() ? `<div class="panel faculty-approval">
@@ -806,6 +811,17 @@
     app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-move-student]').forEach((btn) => btn.addEventListener('click', async () => {
+      const className = app.querySelector(`[data-student-class="${btn.dataset.moveStudent}"]`).value;
+      if (!className) return toast('옮길 분반을 선택하세요.', 'warn');
+      try { await API.manageStudentRoute(btn.dataset.moveStudent, className); toast('학생 분반과 지도교수를 변경했습니다.', 'ok'); viewProfessor(preCase, preClass); }
+      catch (e) { toast(e.message || '분반 변경 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-unassign-student]').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!window.confirm('이 학생의 분반과 지도교수 배정을 해제할까요? 기존 실습 기록은 유지됩니다.')) return;
+      try { await API.manageStudentRoute(btn.dataset.unassignStudent, ''); toast('학생의 분반 배정을 해제했습니다.', 'ok'); viewProfessor(preCase, preClass); }
+      catch (e) { toast(e.message || '분반 해제 실패', 'warn'); }
     }));
 
     function rowHtml(r) {

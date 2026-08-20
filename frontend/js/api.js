@@ -98,6 +98,7 @@ const API = (() => {
     assignFacultyClasses: (userId, classes) => req('PUT', `/api/admin/faculty-assignments/${userId}`, { classes }),
     studentApprovals: () => req('GET', '/api/admin/student-approvals'),
     reviewStudent: (userId, decision) => req('PUT', `/api/admin/student-approvals/${userId}`, { decision }),
+    manageStudentRoute: (userId, className) => req('PUT', `/api/admin/students/${userId}/route`, { className }),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));
