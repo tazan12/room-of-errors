@@ -833,7 +833,7 @@
         <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
         <td>${man('priority',15)}</td><td>${man('sbar',15)}</td><td>${man('teamwork',10)}</td><td>${man('reflection',5)}</td>
         <td class="total"><b>${r.total ?? '-'}</b></td>
-        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">성적 입력 초기화</button>` : ''}</td>
+        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">전체 실습·성적 초기화</button>` : ''}</td>
       </tr>`;
     }
     function bindProfRows() {
@@ -852,12 +852,12 @@
       });
       app.querySelectorAll('[data-reset-score]').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          if (!window.confirm('이 실습 기록의 교수자 입력 점수를 초기화하시겠습니까? 학생 제출 내용은 유지됩니다.')) return;
+          if (!window.confirm('이 실습 기록을 처음 상태로 초기화할까요?\n\n초기화 대상: 오류 탐지, 고위험 판정, 우선순위, SBAR, 성찰, 자동·수동 점수\n유지: 학생 계정, 분반, 조 정보')) return;
           try {
             await API.resetManual(btn.dataset.resetScore);
-            toast('수동 채점 점수를 초기화했습니다.', 'ok');
+            toast('오류 탐지와 자동·수동 성적을 모두 초기화했습니다.', 'ok');
             viewProfessor(preCase, preClass);
-          } catch (e) { toast(e.message || '성적 초기화 실패', 'warn'); }
+          } catch (e) { toast(e.message || '전체 실습 초기화 실패', 'warn'); }
         });
       });
     }

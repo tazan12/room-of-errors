@@ -277,7 +277,15 @@ app.put('/api/sessions/:id/manual', requireAuth, requireInstructor, async (req, 
 app.post('/api/sessions/:id/manual/reset', requireAuth, requireAdmin, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  const saved = await db.updateSession(req.auth.token, s.id, { manualScores: {}, status: 'reporting' });
+  const saved = await db.updateSession(req.auth.token, s.id, {
+    findings: [],
+    priorities: [],
+    sbar: { s: '', b: '', a: '', r: '' },
+    reflection: {},
+    manualScores: {},
+    status: 'active',
+    submittedAt: null,
+  });
   res.json({ session: saved, score: finalScore(saved) });
 });
 
