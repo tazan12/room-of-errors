@@ -135,5 +135,6 @@ const API = (() => {
       const p = new URLSearchParams(Object.entries(q).filter(([, v]) => v));
       return req('GET', `/api/professor/sessions?${p}`);
     },
+    sessionDetail: (id) => req('GET', `/api/professor/sessions/${id}`),
   };
 })();

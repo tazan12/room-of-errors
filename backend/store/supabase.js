@@ -197,6 +197,25 @@ async function createSession(token, userId, data) {
   return toSession(saved);
 }
 
+/* 교수자·관리자 미리보기 세션 — 조 정보(분반/조이름/조원) 입력 없이 병실에 바로 들어가기 위한 것.
+ * 학생 세션과 달리 지도교수 배정 조회도, 프로필 변경도 하지 않는다.
+ * (교수자 프로필은 role이 student가 아니라 RLS상 수정이 막혀 있기도 하다) */
+const PREVIEW_CLASS = '미리보기';
+
+async function createPreviewSession(token, userId, data) {
+  const row = {
+    student_user_id: userId,
+    faculty_user_id: userId, // 본인을 담당자로 두어 이후 조회·수정 권한을 확보
+    case_id: data.caseId,
+    class_name: PREVIEW_CLASS,
+    team_name: data.teamName || '교수 미리보기',
+    members: data.members || [],
+  };
+  const { data: saved, error } = await client(token).from('roe_sessions').insert(row).select().single();
+  if (error) throw error;
+  return toSession(saved);
+}
+
 async function getSession(token, id) {
   const { data, error } = await client(token).from('roe_sessions').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
@@ -222,4 +241,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, createSession, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };

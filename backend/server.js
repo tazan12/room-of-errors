@@ -15,6 +15,7 @@
  *  GET  /api/sessions/:id/score       채점 결과(자동 점수 포함)
  *  PUT  /api/sessions/:id/manual      교수자 수동 점수 입력
  *  GET  /api/professor/sessions       전체 세션(반/사례 필터) — 교수 대시보드
+ *  GET  /api/professor/sessions/:id   세션 상세(학생이 작성한 탐지·우선순위·SBAR·성찰 전문) — 교수 채점용
  */
 const express = require('express');
 const path = require('path');
@@ -60,29 +61,35 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 }
 
+const isInstructor = (auth) => ['admin', 'faculty'].includes(auth?.role);
+
 function requireInstructor(req, res, next) {
-  if (['admin', 'faculty'].includes(req.auth?.role)) return next();
+  if (isInstructor(req.auth)) return next();
   return res.status(403).json({ error: '교수자 권한이 필요합니다.' });
 }
 
 function requireApproved(req, res, next) {
-  if (['admin', 'faculty'].includes(req.auth?.role) || req.auth?.profile?.approval_status === 'approved') return next();
+  if (isInstructor(req.auth) || req.auth?.profile?.approval_status === 'approved') return next();
   return res.status(403).json({ error: '관리자 승인 후 사용할 수 있습니다.' });
 }
 
-/* 채점 행 생성(교수 대시보드·내보내기 공용) */
+/* 채점 행 생성(교수 대시보드·내보내기 공용)
+ * 교수자 미리보기 세션은 학생 성적이 아니므로 채점 목록에서 제외한다. */
 async function buildScoreRows(token, filter = {}) {
-  return (await db.listSessions(token, filter)).map((s) => {
-    const score = finalScore(s);
-    return {
-      id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName,
-      members: s.members, status: s.status, createdAt: s.createdAt,
-      total: score ? score.total : null,
-      detectedCount: score ? score.auto.detectedCount : 0,
-      highRiskHit: score ? score.auto.highRiskHit.length : 0,
-      breakdown: score ? score.breakdown : null,
-    };
-  });
+  const sessions = await db.listSessions(token, filter);
+  return sessions
+    .filter((s) => s.className !== db.PREVIEW_CLASS)
+    .map((s) => {
+      const score = finalScore(s);
+      return {
+        id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName,
+        members: s.members, status: s.status, createdAt: s.createdAt,
+        total: score ? score.total : null,
+        detectedCount: score ? score.auto.detectedCount : 0,
+        highRiskHit: score ? score.auto.highRiskHit.length : 0,
+        breakdown: score ? score.breakdown : null,
+      };
+    });
 }
 
 /* ================= 인증 API ================= */
@@ -219,8 +226,13 @@ app.post('/api/sessions', requireAuth, requireApproved, async (req, res) => {
   if (!CASES.find((c) => c.id === caseId)) {
     return res.status(400).json({ error: 'invalid caseId' });
   }
-  try { res.status(201).json(await db.createSession(req.auth.token, req.auth.user.id, req.body)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    // 교수자·관리자는 조 정보 입력 없이 바로 입장(미리보기 세션)
+    const created = isInstructor(req.auth)
+      ? await db.createPreviewSession(req.auth.token, req.auth.user.id, req.body)
+      : await db.createSession(req.auth.token, req.auth.user.id, req.body);
+    res.status(201).json(created);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.get('/api/sessions/:id', requireAuth, requireApproved, async (req, res) => {
@@ -242,16 +254,34 @@ app.put('/api/sessions/:id/priorities', requireAuth, requireApproved, async (req
   res.json(await db.updateSession(req.auth.token, s.id, { priorities: (req.body.priorities || []).slice(0, 5) }));
 });
 
+/* SBAR·성찰은 한 세션(조)을 여러 학생이 동시에 편집할 수 있다.
+ * 전체 객체를 통째로 덮어쓰면 다른 조원이 방금 저장한 항목이 지워지므로,
+ * 클라이언트가 실제로 변경한 항목만 받아 기존 값에 병합한다. */
+function mergeFields(current, patch, keys) {
+  const merged = { ...(current || {}) };
+  if (patch && typeof patch === 'object') {
+    for (const k of keys) if (typeof patch[k] === 'string') merged[k] = patch[k];
+  }
+  return merged;
+}
+
+const SBAR_KEYS = ['s', 'b', 'a', 'r'];
+const REFLECTION_KEYS = ['firstAction', 'rationale', 'missed', 'apply', 'teamwork'];
+
 app.put('/api/sessions/:id/sbar', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  res.json(await db.updateSession(req.auth.token, s.id, { sbar: req.body.sbar || s.sbar }));
+  const sbar = mergeFields(s.sbar, req.body.sbar, SBAR_KEYS);
+  const saved = await db.updateSession(req.auth.token, s.id, { sbar });
+  res.json({ ...saved, savedAt: new Date().toISOString() });
 });
 
 app.put('/api/sessions/:id/reflection', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
-  res.json(await db.updateSession(req.auth.token, s.id, { reflection: req.body.reflection || s.reflection }));
+  const reflection = mergeFields(s.reflection, req.body.reflection, REFLECTION_KEYS);
+  const saved = await db.updateSession(req.auth.token, s.id, { reflection });
+  res.json({ ...saved, savedAt: new Date().toISOString() });
 });
 
 app.post('/api/sessions/:id/submit', requireAuth, requireApproved, async (req, res) => {
@@ -300,6 +330,19 @@ app.post('/api/sessions/:id/manual/reset', requireAuth, requireAdmin, async (req
 app.get('/api/professor/sessions', requireAuth, requireInstructor, async (req, res) => {
   const { caseId, className } = req.query;
   res.json(await buildScoreRows(req.auth.token, { caseId, className }));
+});
+
+/* 세션 상세 — 학생이 작성한 오류 탐지 기록·우선순위·SBAR·성찰을 그대로 노출(교수자 채점 근거) */
+app.get('/api/professor/sessions/:id', requireAuth, requireInstructor, async (req, res) => {
+  const s = await db.getSession(req.auth.token, req.params.id);
+  if (!s) return res.status(404).json({ error: '실습 기록을 찾을 수 없습니다.' });
+  const c = CASES.find((x) => x.id === s.caseId);
+  const labelOf = (id) => c?.objects.find((o) => o.id === id)?.label || id;
+  const findings = (s.findings || [])
+    .filter((f) => f.flagged)
+    .map((f) => ({ ...f, label: labelOf(f.objectId) }));
+  const priorities = (s.priorities || []).map((objectId, i) => ({ rank: i + 1, objectId, label: labelOf(objectId) }));
+  res.json({ session: s, score: finalScore(s), caseTitle: c ? c.title : s.caseId, findings, priorities });
 });
 
 /* ================= 내보내기 (관리자 전용) ================= */

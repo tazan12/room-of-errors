@@ -467,6 +467,37 @@ textarea { resize: vertical; min-height: 60px; }
 .sbar-k { font-weight: 850; color: var(--aqua); padding-top: 9px; }
 .reflect-form label { color: var(--text); font-weight: 600; }
 
+/* ---------- 저장 상태 표시(학생용) ---------- */
+.save-state {
+  display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 2px;
+  padding: 7px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 650;
+  border: .8px solid var(--line2); background: var(--navy); color: var(--muted);
+}
+.save-state .save-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.save-state[data-state="saved"] { color: var(--aqua); border-color: rgba(87,213,209,.45); background: rgba(87,213,209,.10); }
+.save-state[data-state="saving"] { color: #f3d98a; border-color: rgba(243,217,138,.4); background: rgba(243,217,138,.10); }
+.save-state[data-state="saving"] .save-dot { animation: savePulse 1s ease-in-out infinite; }
+.save-state[data-state="dirty"] { color: #f3d98a; border-color: rgba(243,217,138,.35); }
+.save-state[data-state="error"] { color: #ff9c8f; border-color: rgba(255,156,143,.45); background: rgba(255,156,143,.10); }
+@keyframes savePulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.save-help { font-size: 12px; margin: 6px 0 0; }
+.step-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.step-actions .btn.lg { flex: 1; min-width: 200px; }
+.saved-inline { font-size: 12px; font-weight: 700; color: var(--aqua); margin-left: 6px; }
+
+/* ---------- 교수자 채점 안내 ---------- */
+.grade-intro { margin: 22px 0 10px; }
+.grade-intro h3 { margin: 0 0 6px; font-size: 17px; }
+.grade-intro p { margin: 0; line-height: 1.6; max-width: 900px; font-size: 13px; }
+.view-btn { background: rgba(87,213,209,.14); border-color: rgba(87,213,209,.5); color: var(--aqua); font-weight: 700; }
+.view-btn:hover { background: rgba(87,213,209,.24); }
+.btn.danger { color: #ff9c8f; border-color: rgba(255,156,143,.35); }
+.hero-hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+.preview-note {
+  margin: 18px 0 4px; padding: 12px 14px; border-radius: 12px; line-height: 1.6; font-size: 13px;
+  color: var(--aqua); background: rgba(87,213,209,.10); border: .8px solid rgba(87,213,209,.35);
+}
+
 /* ---------- 결과 ---------- */
 .result-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
 .score-ring {
@@ -514,6 +545,19 @@ textarea { resize: vertical; min-height: 60px; }
 .prof-table td.ro { color: var(--aqua); font-weight: 750; }
 .prof-table td.total b { color: var(--aqua); font-size: 15px; }
 .mini-in { width: 54px; text-align: center; padding: 6px; border-radius: 9px; }
+
+/* ---------- 교수자: 학생 작성 내용 보기 모달 ---------- */
+.modal.detail { max-width: 720px; text-align: left; }
+.modal.detail h4 { margin: 20px 0 8px; font-size: 14px; color: var(--aqua); }
+.modal.detail h4:first-of-type { margin-top: 6px; }
+.prio-review { margin: 0 0 8px; padding-left: 22px; }
+.prio-review li { margin: 4px 0; line-height: 1.5; }
+.reflect-review p { margin: 8px 0; line-height: 1.55; }
+.detail-score { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.detail-score-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.detail-score-row .mini-in { width: 60px; }
+.detail-total { margin-top: 10px; font-size: 15px; text-align: right; }
+.detail-total b { color: var(--aqua); font-size: 18px; }
 
 /* ---------- 토스트 ---------- */
 .toast {

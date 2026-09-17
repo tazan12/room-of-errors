@@ -26,6 +26,34 @@
   }
   const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+  /* ---------------- 저장 상태 표시 ----------------
+   * 학생이 "내가 쓴 내용이 서버에 저장되었는지"를 화면에서 바로 확인할 수 있게 한다. */
+  const saveStateHTML = (id) =>
+    `<div class="save-state" id="${id}" data-state="idle"><span class="save-dot"></span><span class="save-text">아직 저장되지 않음</span></div>`;
+
+  const clockKR = (iso) => {
+    const d = iso ? new Date(iso) : new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  function setSaveState(el, state, text) {
+    if (!el) return;
+    el.dataset.state = state;
+    const label = el.querySelector('.save-text');
+    if (label) label.textContent = text;
+  }
+  const markSaving = (el) => setSaveState(el, 'saving', '저장 중…');
+  const markSaved = (el, iso) => setSaveState(el, 'saved', `저장됨 ✓ ${clockKR(iso)}`);
+  const markDirty = (el) => setSaveState(el, 'dirty', '작성 중 — 아직 저장 안 됨');
+  const markError = (el, msg) => setSaveState(el, 'error', `저장 실패: ${msg || '네트워크 오류'}`);
+
+  /* 서버의 최신 세션으로 갱신(다른 조원이 저장한 내용을 덮어쓰지 않도록) */
+  async function refreshSession() {
+    try { S.session = await API.getSession(S.session.id); }
+    catch (e) { /* 네트워크 실패 시 기존 화면 상태를 유지 */ }
+    return S.session;
+  }
+
   const vitalsRow = (v) => {
     const items = [];
     if (v.BP) items.push(['혈압', v.BP + ' mmHg']);
@@ -153,7 +181,10 @@
           <h1>병실로 들어가 <span>숨은 환자안전 오류</span>를 찾으세요</h1>
           <p>조별로 병실을 관찰해 오류를 기록하고, 즉시 위해가 될 상위 5개를 우선순위화한 뒤 SBAR로 보고합니다.
              총 4개 사례 · 사례당 10개 오류 · 100점 루브릭 자동/수동 채점.</p>
-          ${!API.isInstructor() ? `<button class="btn ghost" id="editStudentProfile">내 정보·분반 변경</button>` : ''}
+          ${API.isInstructor()
+            ? `<button class="btn primary" id="goGrade">학생 작성 내용 보기 · 채점하기 →</button>
+               <p class="hero-hint">담당 분반 조별로 오류 기록·우선순위·SBAR·성찰을 확인하고 점수를 입력합니다.</p>`
+            : `<button class="btn ghost" id="editStudentProfile">내 정보·분반 변경</button>`}
         </div>
       </section>
       <div class="case-grid">
@@ -175,6 +206,7 @@
     app.querySelectorAll('[data-case]').forEach((b) =>
       b.addEventListener('click', () => viewIntake(b.dataset.case)));
     app.querySelector('#editStudentProfile')?.addEventListener('click', viewProfileSetup);
+    app.querySelector('#goGrade')?.addEventListener('click', () => viewProfessor());
   }
 
   /* ================= 화면: 조 정보 입력 ================= */
@@ -183,7 +215,9 @@
     S.caseData = await API.getCase(caseId);
     const c = S.caseData;
     const profile = API.user()?.profile || {};
-    const routes = (await API.facultyRoutes()).filter((r) => r.classes?.length);
+    const instructor = API.isInstructor();
+    // 교수자·관리자는 조 정보(분반·조이름·조원)를 입력하지 않고 바로 입장한다.
+    const routes = instructor ? [] : (await API.facultyRoutes()).filter((r) => r.classes?.length);
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" data-route="home">← 사례 선택으로</a>
@@ -201,31 +235,44 @@
             <h4>관찰 초점</h4>
             <p class="muted">${esc(c.patient.focus)}</p>
           </div>
-          <h4>조 정보</h4>
-          <div class="form-grid">
-            <label>분반 <select id="f-class"><option value="">선택</option>${routes.flatMap((r) => r.classes.map((name) => `<option value="${name}" ${profile.class_name===name?'selected':''}>${name} · ${esc(r.full_name || r.email)} 교수</option>`)).join('')}</select></label>
-            <label>조 이름 <input id="f-team" placeholder="예: 3조" /></label>
-            <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." value="${esc(profile.full_name || '')}" /></label>
-          </div>
-          <button class="btn primary lg" id="startBtn">병실 입장 →</button>
+          ${instructor ? `
+            <p class="preview-note">교수자 미리보기로 입장합니다. 조 정보를 입력할 필요가 없으며,
+              여기서 만든 기록은 학생 채점 목록에 포함되지 않습니다.</p>
+          ` : `
+            <h4>조 정보</h4>
+            <div class="form-grid">
+              <label>분반 <select id="f-class"><option value="">선택</option>${routes.flatMap((r) => r.classes.map((name) => `<option value="${name}" ${profile.class_name===name?'selected':''}>${name} · ${esc(r.full_name || r.email)} 교수</option>`)).join('')}</select></label>
+              <label>조 이름 <input id="f-team" placeholder="예: 3조" /></label>
+              <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." value="${esc(profile.full_name || '')}" /></label>
+            </div>
+          `}
+          <button class="btn primary lg" id="startBtn">${instructor ? '병실 입장(미리보기) →' : '병실 입장 →'}</button>
         </div>
       </div>`;
     app.querySelector('[data-route="home"]').addEventListener('click', viewHome);
     app.querySelector('#startBtn').addEventListener('click', async () => {
+      const btn = app.querySelector('#startBtn');
+      btn.disabled = true;
       try {
-        const members = app.querySelector('#f-members').value.split(',').map((s) => s.trim()).filter(Boolean);
-        const className = app.querySelector('#f-class').value;
-        if (!className) return toast('분반을 선택하세요.', 'warn');
-        S.session = await API.createSession({
-          caseId,
-          className,
-          teamName: app.querySelector('#f-team').value.trim(),
-          members,
-        });
-        await API.me();
+        let payload = { caseId };
+        if (!instructor) {
+          const className = app.querySelector('#f-class').value;
+          if (!className) { btn.disabled = false; return toast('분반을 선택하세요.', 'warn'); }
+          payload = {
+            caseId,
+            className,
+            teamName: app.querySelector('#f-team').value.trim(),
+            members: app.querySelector('#f-members').value.split(',').map((s) => s.trim()).filter(Boolean),
+          };
+        }
+        S.session = await API.createSession(payload);
+        if (!instructor) await API.me(); // 학생만 분반·지도교수 정보가 갱신된다
         saveLocal();
         viewRoom();
-      } catch (e) { toast(e.message || '병실 입장 준비 실패', 'warn'); }
+      } catch (e) {
+        btn.disabled = false;
+        toast(e.message || '병실 입장 준비 실패', 'warn');
+      }
     });
   }
 
@@ -372,21 +419,31 @@
     modal.querySelector('#mx').addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
     modal.querySelector('#i-none').addEventListener('click', async () => {
-      await upsertFinding(objectId, { flagged: false });
-      close(); toast('점검 완료 — 오류 없음으로 표시'); S.room.refreshBadges();
+      try {
+        await upsertFinding(objectId, { flagged: false });
+        close(); toast('점검 완료 — 오류 없음으로 저장됨 ✓', 'ok'); S.room.refreshBadges();
+      } catch (e) { toast(`저장 실패: ${e.message || '연결을 확인하세요'}`, 'warn'); }
     });
     modal.querySelector('#i-save').addEventListener('click', async () => {
       const loc = modal.querySelector('#i-loc').value.trim();
       if (!loc) return toast('위치/단서를 입력하세요', 'warn');
-      await upsertFinding(objectId, {
-        flagged: true,
-        location: loc,
-        why: modal.querySelector('#i-why').value.trim(),
-        action: modal.querySelector('#i-act').value.trim(),
-        isHighRiskGuess: modal.querySelector('#i-high').checked,
-      });
-      close(); toast('오류 기록됨 ✓', 'ok');
-      updateProgress(); S.room.refreshBadges();
+      const btn = modal.querySelector('#i-save');
+      btn.disabled = true; btn.textContent = '저장 중…';
+      try {
+        await upsertFinding(objectId, {
+          flagged: true,
+          location: loc,
+          why: modal.querySelector('#i-why').value.trim(),
+          action: modal.querySelector('#i-act').value.trim(),
+          isHighRiskGuess: modal.querySelector('#i-high').checked,
+        });
+        close(); toast('오류 기록이 저장되었습니다 ✓', 'ok');
+        updateProgress(); S.room.refreshBadges();
+      } catch (e) {
+        // 저장 실패 시 모달을 닫지 않는다 — 학생이 쓴 내용이 사라지지 않도록.
+        toast(`저장 실패: ${e.message || '연결을 확인하세요'}`, 'warn');
+        btn.disabled = false; btn.textContent = '오류로 기록';
+      }
     });
   }
 
@@ -440,8 +497,10 @@
     // 오브젝트 단위로 기록을 저장(같은 오브젝트의 이전 기록은 대체)
     const findings = (S.session.findings || []).filter((f) => f.objectId !== objectId);
     if (patch.flagged) findings.push({ objectId, ...patch });
-    S.session.findings = findings;
+    // 서버 저장이 성공한 뒤에만 화면 상태에 반영한다.
+    // 실패했는데 기록된 것처럼 보이는 상황을 막기 위함.
     S.session = await API.saveFindings(S.session.id, findings);
+    return S.session;
   }
 
   function updateProgress() {
@@ -457,6 +516,8 @@
         <button class="modal-x" id="mx">✕</button>
         <h3>오류 탐지 기록지</h3>
         ${list.length === 0 ? '<p class="muted">아직 기록된 오류가 없습니다.</p>' : `
+        <p class="saved-note">✓ 아래 ${list.length}건은 서버에 저장되어 있습니다. 교수자가 그대로 확인합니다.</p>`}
+        ${list.length === 0 ? '' : `
         <table class="find-table">
           <thead><tr><th>#</th><th>위치/단서</th><th>왜 위험</th><th>조치</th><th>고위험</th></tr></thead>
           <tbody>${list.map((f, i) => `<tr>
@@ -545,20 +606,40 @@
     rerank();
     app.querySelector('#toSbar').addEventListener('click', async () => {
       if (order.length === 0) return toast('최소 1개 이상 선택하세요', 'warn');
-      S.session = await API.savePriorities(S.session.id, order);
-      viewSbar();
+      const btn = app.querySelector('#toSbar');
+      btn.disabled = true;
+      try {
+        S.session = await API.savePriorities(S.session.id, order);
+        toast('우선순위가 저장되었습니다 ✓', 'ok');
+        viewSbar();
+      } catch (e) {
+        toast(`저장 실패: ${e.message || '연결을 확인하세요'}`, 'warn');
+        btn.disabled = false;
+      }
     });
   }
 
   /* ================= 화면: SBAR ================= */
+  const SBAR_ROWS = [
+    ['s', 'S 상황', '현재 가장 위험하다고 판단한 문제를 한 문장으로'],
+    ['b', 'B 배경', '진단, 수술/검사/처방, 관련 위험요인을 간단히'],
+    ['a', 'A 사정', '관찰한 객관적 단서와 위험 판단근거'],
+    ['r', 'R 제안', '즉시 필요한 간호조치, 보고/처방 확인, 추가 사정 제안'],
+  ];
+
+  const REFLECT_ROWS = [
+    ['firstAction', '가장 먼저 조치해야 한다고 판단한 오류'],
+    ['rationale', '그렇게 판단한 근거'],
+    ['missed', '우리 조가 놓쳤을 가능성이 있는 오류'],
+    ['apply', '실제 임상실습에서 적용할 행동 1가지'],
+    ['teamwork', '팀 의사소통에서 좋았던 점/개선할 점'],
+  ];
+
   async function viewSbar() {
+    // 화면 진입 시 서버 최신본을 먼저 받아온다. 예전 화면의 낡은 값으로 덮어써서
+    // 작성한 내용이 다른 내용으로 바뀌어 보이던 문제를 막는다.
+    await refreshSession();
     const sb = S.session.sbar || {};
-    const rows = [
-      ['s', 'S 상황', '현재 가장 위험하다고 판단한 문제를 한 문장으로'],
-      ['b', 'B 배경', '진단, 수술/검사/처방, 관련 위험요인을 간단히'],
-      ['a', 'A 사정', '관찰한 객관적 단서와 위험 판단근거'],
-      ['r', 'R 제안', '즉시 필요한 간호조치, 보고/처방 확인, 추가 사정 제안'],
-    ];
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" id="backPrio">← 우선순위화로</a>
@@ -566,52 +647,172 @@
           <h2>SBAR 구두보고 준비</h2>
           <p class="muted">가장 위험한 오류 1~2개를 SBAR 형식으로 교수자에게 보고합니다. 2분 이내로 작성하세요.</p>
           <div class="sbar-form">
-            ${rows.map(([k, label, ph]) => `
+            ${SBAR_ROWS.map(([k, label, ph]) => `
               <div class="sbar-row">
                 <span class="sbar-k">${label}</span>
                 <textarea data-k="${k}" placeholder="${ph}">${esc(sb[k])}</textarea>
               </div>`).join('')}
           </div>
-          <button class="btn primary lg" id="toReflect">개인 성찰 →</button>
+          ${saveStateHTML('sbarSave')}
+          <p class="save-help muted">입력을 멈추면 자동으로 저장되며, 화면을 벗어날 때도 저장됩니다.</p>
+          <div class="step-actions">
+            <button class="btn ghost" id="saveSbarNow">지금 저장</button>
+            <button class="btn primary lg" id="toReflect">개인 성찰 →</button>
+          </div>
         </div>
       </div>`;
-    app.querySelector('#backPrio').addEventListener('click', viewPriority);
+
+    const badge = app.querySelector('#sbarSave');
+    // 로드 시점의 값을 기준으로 삼아, 실제로 바뀐 항목만 서버에 보낸다.
+    // 같은 조의 다른 학생이 저장한 항목을 덮어쓰지 않게 하는 핵심 장치.
+    let baseline = {};
+    SBAR_ROWS.forEach(([k]) => (baseline[k] = sb[k] || ''));
+    const anyText = SBAR_ROWS.some(([k]) => baseline[k]);
+    if (anyText) setSaveState(badge, 'saved', '저장된 내용 불러옴');
+
+    const readForm = () => {
+      const out = {};
+      app.querySelectorAll('textarea[data-k]').forEach((t) => (out[t.dataset.k] = t.value.trim()));
+      return out;
+    };
+    const changedFields = (cur) => {
+      const diff = {};
+      SBAR_ROWS.forEach(([k]) => { if ((cur[k] || '') !== (baseline[k] || '')) diff[k] = cur[k] || ''; });
+      return diff;
+    };
+
+    let timer = null;
+    let saving = null;
+    async function saveSbar() {
+      clearTimeout(timer);
+      if (saving) await saving.catch(() => {});
+      const cur = readForm();
+      const diff = changedFields(cur);
+      if (!Object.keys(diff).length) return true;
+      markSaving(badge);
+      saving = (async () => {
+        const saved = await API.saveSbar(S.session.id, diff);
+        S.session = saved;
+        baseline = { ...baseline, ...diff };
+        markSaved(badge, saved.savedAt);
+      })();
+      try { await saving; return true; }
+      catch (e) { markError(badge, e.message); return false; }
+      finally { saving = null; }
+    }
+
+    app.querySelectorAll('textarea[data-k]').forEach((t) => {
+      t.addEventListener('input', () => {
+        markDirty(badge);
+        clearTimeout(timer);
+        timer = setTimeout(saveSbar, 1200);
+      });
+      t.addEventListener('blur', saveSbar);
+    });
+
+    app.querySelector('#saveSbarNow').addEventListener('click', async () => {
+      const cur = readForm();
+      if (!Object.keys(changedFields(cur)).length) {
+        markSaved(badge, S.session.savedAt);
+        return toast('변경된 내용이 없습니다', '');
+      }
+      if (await saveSbar()) toast('SBAR 저장됨 ✓', 'ok');
+    });
+
+    // 뒤로 가기에서도 반드시 저장 — 예전에는 여기서 작성 내용이 그대로 사라졌다.
+    app.querySelector('#backPrio').addEventListener('click', async () => {
+      await saveSbar();
+      viewPriority();
+    });
     app.querySelector('#toReflect').addEventListener('click', async () => {
-      const sbar = {};
-      app.querySelectorAll('[data-k]').forEach((t) => (sbar[t.dataset.k] = t.value.trim()));
-      S.session = await API.saveSbar(S.session.id, sbar);
+      if (!(await saveSbar())) return toast('저장에 실패했습니다. 연결 확인 후 다시 시도하세요.', 'warn');
       viewReflection();
     });
   }
 
   /* ================= 화면: 개인 성찰 ================= */
   async function viewReflection() {
+    await refreshSession();
     const r = S.session.reflection || {};
-    const rows = [
-      ['firstAction', '가장 먼저 조치해야 한다고 판단한 오류'],
-      ['rationale', '그렇게 판단한 근거'],
-      ['missed', '우리 조가 놓쳤을 가능성이 있는 오류'],
-      ['apply', '실제 임상실습에서 적용할 행동 1가지'],
-      ['teamwork', '팀 의사소통에서 좋았던 점/개선할 점'],
-    ];
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" id="backSbar">← SBAR로</a>
         <div class="panel">
           <h2>개인 성찰 기록</h2>
           <div class="reflect-form">
-            ${rows.map(([k, label]) => `
+            ${REFLECT_ROWS.map(([k, label]) => `
               <label>${label}<textarea data-r="${k}">${esc(r[k])}</textarea></label>`).join('')}
           </div>
-          <button class="btn primary lg" id="submitAll">제출하고 결과 보기 →</button>
+          ${saveStateHTML('reflSave')}
+          <p class="save-help muted">입력을 멈추면 자동으로 저장되며, 화면을 벗어날 때도 저장됩니다.</p>
+          <div class="step-actions">
+            <button class="btn ghost" id="saveReflNow">지금 저장</button>
+            <button class="btn primary lg" id="submitAll">제출하고 결과 보기 →</button>
+          </div>
         </div>
       </div>`;
-    app.querySelector('#backSbar').addEventListener('click', viewSbar);
+
+    const badge = app.querySelector('#reflSave');
+    let baseline = {};
+    REFLECT_ROWS.forEach(([k]) => (baseline[k] = r[k] || ''));
+    if (REFLECT_ROWS.some(([k]) => baseline[k])) setSaveState(badge, 'saved', '저장된 내용 불러옴');
+
+    const readForm = () => {
+      const out = {};
+      app.querySelectorAll('textarea[data-r]').forEach((t) => (out[t.dataset.r] = t.value.trim()));
+      return out;
+    };
+    const changedFields = (cur) => {
+      const diff = {};
+      REFLECT_ROWS.forEach(([k]) => { if ((cur[k] || '') !== (baseline[k] || '')) diff[k] = cur[k] || ''; });
+      return diff;
+    };
+
+    let timer = null;
+    let saving = null;
+    async function saveRefl() {
+      clearTimeout(timer);
+      if (saving) await saving.catch(() => {});
+      const diff = changedFields(readForm());
+      if (!Object.keys(diff).length) return true;
+      markSaving(badge);
+      saving = (async () => {
+        const saved = await API.saveReflection(S.session.id, diff);
+        S.session = saved;
+        baseline = { ...baseline, ...diff };
+        markSaved(badge, saved.savedAt);
+      })();
+      try { await saving; return true; }
+      catch (e) { markError(badge, e.message); return false; }
+      finally { saving = null; }
+    }
+
+    app.querySelectorAll('textarea[data-r]').forEach((t) => {
+      t.addEventListener('input', () => {
+        markDirty(badge);
+        clearTimeout(timer);
+        timer = setTimeout(saveRefl, 1200);
+      });
+      t.addEventListener('blur', saveRefl);
+    });
+
+    app.querySelector('#saveReflNow').addEventListener('click', async () => {
+      if (!Object.keys(changedFields(readForm())).length) {
+        markSaved(badge, S.session.savedAt);
+        return toast('변경된 내용이 없습니다', '');
+      }
+      if (await saveRefl()) toast('성찰 저장됨 ✓', 'ok');
+    });
+
+    // 뒤로 가기에서도 저장 — 예전에는 여기서 작성 내용이 사라졌다.
+    app.querySelector('#backSbar').addEventListener('click', async () => {
+      await saveRefl();
+      viewSbar();
+    });
     app.querySelector('#submitAll').addEventListener('click', async () => {
-      const refl = {};
-      app.querySelectorAll('[data-r]').forEach((t) => (refl[t.dataset.r] = t.value.trim()));
-      S.session = await API.saveReflection(S.session.id, refl);
+      if (!(await saveRefl())) return toast('저장에 실패했습니다. 연결 확인 후 다시 시도하세요.', 'warn');
       await API.submit(S.session.id);
+      toast('제출 완료 — 작성한 내용이 모두 저장되었습니다 ✓', 'ok');
       viewResult();
     });
   }
@@ -669,10 +870,15 @@
           <div class="panel">
             <h3>디브리핑 질문</h3>
             <ol class="debrief">${answers.debrief.map((d) => `<li>${esc(d)}</li>`).join('')}</ol>
-            <h3>우리 조 SBAR</h3>
+            <h3>우리 조 SBAR <span class="saved-inline">저장됨 ✓</span></h3>
             <div class="sbar-review">
               ${['s','b','a','r'].map((k) => `<p><b>${k.toUpperCase()}</b> ${esc((S.session.sbar||{})[k]) || '<span class="muted">미작성</span>'}</p>`).join('')}
             </div>
+            <h3>내 성찰 기록 <span class="saved-inline">저장됨 ✓</span></h3>
+            <div class="reflect-review">
+              ${REFLECT_ROWS.map(([k, label]) => `<p><b>${esc(label)}</b><br>${esc((S.session.reflection||{})[k]) || '<span class="muted">미작성</span>'}</p>`).join('')}
+            </div>
+            <p class="save-help muted">위 내용이 교수자 화면에 그대로 전달되어 채점됩니다.</p>
             <div class="result-actions">
               <button class="btn ghost" id="again">다른 사례 하기</button>
               <button class="btn primary" id="toProf">교수 대시보드에서 채점</button>
@@ -757,6 +963,12 @@
           <a class="btn tiny" id="exPdf" target="_blank">🖨️ PDF(인쇄)</a>
           <span class="muted export-note">한글(Hancom)은 xlsx·doc·csv를 그대로 열 수 있습니다.</span>
         </div>
+        <div class="grade-intro">
+          <h3>학생 작성 내용 확인 · 채점</h3>
+          <p class="muted">각 조의 <b>작성 내용 보기</b>를 누르면 그 조가 기록한 오류 탐지 내용, 우선순위, SBAR, 개인 성찰을 모두 확인하고
+            그 자리에서 점수를 입력할 수 있습니다. 탐지40·고위험15는 자동 채점이고, 우선15·SBAR15·팀10·성찰5는 교수자가 직접 입력합니다.
+            ${API.isAdmin() ? '총괄관리자는 모든 분반을 볼 수 있습니다.' : '담당하신 분반의 조만 표시됩니다.'}</p>
+        </div>
         <div class="prof-filter">
           <label>사례
             <select id="pf-case">
@@ -782,7 +994,8 @@
             ${rows.map(rowHtml).join('') || '<tr><td colspan="13" class="muted">세션이 없습니다.</td></tr>'}
           </tbody>
         </table>
-      </div>`;
+      </div>
+      <div id="profModal" class="modal-back"></div>`;
     app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value, app.querySelector('#pf-class').value));
     app.querySelector('#pf-class').addEventListener('change', (e) => viewProfessor(app.querySelector('#pf-case').value, e.target.value));
     app.querySelector('#adminCases').addEventListener('click', viewHome);
@@ -833,10 +1046,13 @@
         <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
         <td>${man('priority',15)}</td><td>${man('sbar',15)}</td><td>${man('teamwork',10)}</td><td>${man('reflection',5)}</td>
         <td class="total"><b>${r.total ?? '-'}</b></td>
-        <td><button class="btn tiny" data-save="${r.id}">저장</button>${API.isAdmin() ? `<button class="btn tiny ghost" data-reset-score="${r.id}">전체 실습·성적 초기화</button>` : ''}</td>
+        <td><button class="btn tiny view-btn" data-detail="${r.id}">📄 작성 내용 보기</button> <button class="btn tiny ghost" data-save="${r.id}">점수만 저장</button>${API.isAdmin() ? `<button class="btn tiny ghost danger" data-reset-score="${r.id}">초기화</button>` : ''}</td>
       </tr>`;
     }
     function bindProfRows() {
+      app.querySelectorAll('[data-detail]').forEach((btn) => {
+        btn.addEventListener('click', () => openSessionDetail(btn.dataset.detail));
+      });
       app.querySelectorAll('[data-save]').forEach((btn) => {
         btn.addEventListener('click', async () => {
           const sid = btn.dataset.save;
@@ -860,6 +1076,89 @@
           } catch (e) { toast(e.message || '전체 실습 초기화 실패', 'warn'); }
         });
       });
+    }
+  }
+
+  /* ================= 모달: 학생 작성 내용 보기(교수자 채점 근거) ================= */
+  async function openSessionDetail(sid) {
+    const modal = document.getElementById('profModal');
+    if (!modal) return;
+    const close = () => modal.classList.remove('open');
+    modal.innerHTML = `<div class="modal detail"><p class="muted">불러오는 중…</p></div>`;
+    modal.classList.add('open');
+    modal.onclick = (e) => { if (e.target === modal) close(); };
+    try {
+      const { session, score, caseTitle, findings, priorities } = await API.sessionDetail(sid);
+      const sb = session.sbar || {};
+      const rf = session.reflection || {};
+      const notWritten = '<span class="muted">미작성</span>';
+      modal.innerHTML = `
+        <div class="modal detail">
+          <button class="modal-x" id="mx">✕</button>
+          <div class="case-tag big">CASE ${esc(session.caseId)}</div>
+          <h3>${esc(caseTitle)}</h3>
+          <p class="muted">${esc(session.className)} · ${esc(session.teamName)}${session.members?.length ? ' · ' + esc(session.members.join(', ')) : ''}</p>
+
+          <h4>오류 탐지 기록 <span class="muted">${findings.length}건</span></h4>
+          ${findings.length ? `<table class="find-table">
+            <thead><tr><th>#</th><th>위치/단서</th><th>왜 위험</th><th>조치</th><th>고위험</th></tr></thead>
+            <tbody>${findings.map((f, i) => `<tr>
+              <td>${i + 1}</td>
+              <td><b>${esc(f.label)}</b><br><span class="muted">${esc(f.location)}</span></td>
+              <td>${esc(f.why)}</td><td>${esc(f.action)}</td>
+              <td>${f.isHighRiskGuess ? '⚠️' : ''}</td></tr>`).join('')}</tbody>
+          </table>` : '<p class="muted">기록된 오류가 없습니다.</p>'}
+
+          <h4>상위 5개 우선순위 <span class="muted">선택 순서</span></h4>
+          ${priorities.length ? `<ol class="prio-review">${priorities.map((p) => `<li>${esc(p.label)}</li>`).join('')}</ol>` : '<p class="muted">우선순위를 선택하지 않았습니다.</p>'}
+
+          <h4>SBAR 보고</h4>
+          <div class="sbar-review">
+            ${['s', 'b', 'a', 'r'].map((k) => `<p><b>${k.toUpperCase()}</b> ${esc(sb[k]) || notWritten}</p>`).join('')}
+          </div>
+
+          <h4>개인 성찰</h4>
+          <div class="reflect-review">
+            ${REFLECT_ROWS.map(([k, label]) => `<p><b>${esc(label)}</b><br>${esc(rf[k]) || notWritten}</p>`).join('')}
+          </div>
+
+          <h4>채점</h4>
+          <div class="detail-score">
+            ${score.rubric.map((rb) => `
+              <div class="detail-score-row">
+                <span>${esc(rb.label)} <small class="muted">(${rb.max}점${rb.auto ? ' · 자동' : ''})</small></span>
+                ${rb.auto
+                  ? `<b>${score.breakdown[rb.key]}</b>`
+                  : `<input class="mini-in" data-dk="${rb.key}" type="number" min="0" max="${rb.max}" value="${score.breakdown[rb.key] ?? 0}"/>`}
+              </div>`).join('')}
+            <p class="detail-total">총점 <b>${score.total}</b> / 100</p>
+          </div>
+          <div class="modal-actions">
+            <button class="btn ghost" id="close2">닫기</button>
+            <button class="btn primary" id="saveDetail">채점 저장</button>
+          </div>
+        </div>`;
+      modal.querySelector('#mx').addEventListener('click', close);
+      modal.querySelector('#close2').addEventListener('click', close);
+      modal.querySelector('#saveDetail').addEventListener('click', async () => {
+        const manualScores = {};
+        modal.querySelectorAll('[data-dk]').forEach((inp) => { manualScores[inp.dataset.dk] = Number(inp.value) || 0; });
+        try {
+          const res = await API.saveManual(sid, manualScores);
+          // 목록 화면(교수 대시보드 표)의 값도 함께 갱신
+          Object.entries(manualScores).forEach(([k, v]) => {
+            const tin = document.querySelector(`.mini-in[data-sid="${sid}"][data-k="${k}"]`);
+            if (tin) tin.value = v;
+          });
+          const totalCell = document.querySelector(`tr[data-sid="${sid}"] .total b`);
+          if (totalCell) totalCell.textContent = res.score.total;
+          toast('채점 저장됨 ✓', 'ok');
+          close();
+        } catch (e) { toast(e.message || '채점 저장 실패', 'warn'); }
+      });
+    } catch (e) {
+      modal.innerHTML = `<div class="modal detail"><button class="modal-x" id="mx">✕</button><p class="muted">불러오지 못했습니다: ${esc(e.message)}</p></div>`;
+      modal.querySelector('#mx').addEventListener('click', close);
     }
   }
 
