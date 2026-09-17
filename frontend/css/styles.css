@@ -310,6 +310,13 @@ textarea { resize: vertical; min-height: 60px; }
 }
 .vr-btn:hover, .vr-ctl:hover { border-color: var(--aqua); }
 .vr-btn.primary { background: var(--aqua); color: var(--aqua-deep); border: none; box-shadow: 0 8px 22px rgba(87,213,209,.35); }
+.vr-btn.leave { color: #ff9c8f; border-color: rgba(255,156,143,.4); }
+.vr-btn.leave:hover { border-color: #ff9c8f; background: rgba(255,156,143,.12); }
+.vr-preview {
+  display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; font-style: normal;
+  color: var(--aqua); background: rgba(87,213,209,.14); border: .8px solid rgba(87,213,209,.4);
+}
 .vr-ctl.on { background: var(--aqua); color: var(--aqua-deep); border-color: transparent; }
 
 /* 하단 마커 바로가기 */
@@ -496,6 +503,13 @@ textarea { resize: vertical; min-height: 60px; }
 .preview-note {
   margin: 18px 0 4px; padding: 12px 14px; border-radius: 12px; line-height: 1.6; font-size: 13px;
   color: var(--aqua); background: rgba(87,213,209,.10); border: .8px solid rgba(87,213,209,.35);
+}
+.step-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.step-top .back { margin: 0; }
+.preview-chip {
+  display: inline-block; vertical-align: middle; margin-left: 8px;
+  padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; letter-spacing: 0;
+  color: var(--aqua); background: rgba(87,213,209,.12); border: .8px solid rgba(87,213,209,.4);
 }
 
 /* ---------- 결과 ---------- */

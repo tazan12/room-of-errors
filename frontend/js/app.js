@@ -54,6 +54,27 @@
     return S.session;
   }
 
+  /* ---------------- 교수자 미리보기 ----------------
+   * 미리보기 세션은 학생 성적이 아니므로 채점 목록·내보내기에서 제외된다(서버에서 처리). */
+  const PREVIEW_CLASS = '미리보기';
+  const isPreview = () => S.session?.className === PREVIEW_CLASS;
+  const previewBadge = () => (isPreview()
+    ? '<span class="preview-chip">교수자 미리보기 · 채점에 반영되지 않음</span>' : '');
+
+  /* 실습 도중 언제든 빠져나가기 — 작성한 내용은 이미 저장되어 있다. */
+  function exitBarHTML(backId, backLabel) {
+    return `<div class="step-top">
+      <a class="back" id="${backId}">${backLabel}</a>
+      <button class="btn tiny ghost" id="exitNow">나가기 · 사례 선택으로</button>
+    </div>`;
+  }
+  function bindExit() {
+    app.querySelector('#exitNow')?.addEventListener('click', async () => {
+      if (!isPreview() && !window.confirm('실습을 중단하고 사례 선택 화면으로 나갈까요?\n\n지금까지 작성한 내용은 저장되어 있으며, 나중에 이어서 할 수 있습니다.')) return;
+      viewHome();
+    });
+  }
+
   const vitalsRow = (v) => {
     const items = [];
     if (v.BP) items.push(['혈압', v.BP + ' mmHg']);
@@ -300,12 +321,16 @@
       <div id="inspectModal" class="modal-back"></div>`;
 
     S.room = new Room(document.getElementById('room'), {
-      meta: { caseId: c.id, title: c.title, subtitle: c.subtitle, count: c.objects.length },
+      meta: { caseId: c.id, title: c.title, subtitle: c.subtitle, count: c.objects.length, preview: isPreview() },
       onSelect: openInspect,
       onInfo: openCaseInfo,
       onList: openFindingsList,
       onFinish: viewPriority,
-      onExit: viewHome,
+      onExit: () => {
+        // 병실에서 나가기 — 기록은 이미 저장되어 있으므로 잃는 내용이 없다.
+        if (!isPreview() && !window.confirm('병실에서 나가 사례 선택 화면으로 갈까요?\n\n기록한 오류는 저장되어 있으며, 나중에 이어서 할 수 있습니다.')) return viewRoom();
+        viewHome();
+      },
       onPractice: togglePractice,
       getState: findingsByObject,
     });
@@ -545,12 +570,13 @@
           <button class="modal-x" id="mx">✕</button>
           <div class="finish-help-icon">1</div>
           <h3>오류를 1개 이상 기록해 주세요</h3>
-          <p class="muted">다음 화면인 <b>우선순위화 → SBAR → 개인 성찰 → 결과</b>로 이동하려면 먼저 병실 번호를 눌러 발견한 오류를 기록해야 합니다.</p>
+          <p class="muted">다음 화면인 <b>우선순위화 → SBAR → 개인 성찰 → 결과</b>로 넘어가려면 먼저 병실 번호를 눌러 발견한 오류를 기록해야 합니다.</p>
           <ol>
             <li>병실의 번호 표식을 누릅니다.</li>
             <li>위치와 단서를 입력하고 <b>오류로 기록</b>을 누릅니다.</li>
-            <li>다시 <b>관찰 종료</b>를 누릅니다.</li>
+            <li>다시 <b>다음 단계 →</b>를 누릅니다.</li>
           </ol>
+          <p class="muted">실습을 중단하시려면 상단의 <b>✕ 나가기</b>를 누르세요.</p>
           <div class="modal-actions"><button class="btn primary" id="continueRoom">병실에서 계속 찾기</button></div>
         </div>`;
       modal.classList.add('open');
@@ -565,9 +591,9 @@
     const chosen = new Set(S.session.priorities || []);
     app.innerHTML = `
       <div class="page-narrow">
-        <a class="back" id="backRoom">← 병실로</a>
+        ${exitBarHTML('backRoom', '← 병실로')}
         <div class="panel">
-          <h2>상위 5개 오류 우선순위화</h2>
+          <h2>상위 5개 오류 우선순위화 ${previewBadge()}</h2>
           <p class="muted">ABC · 의식 · 저혈당 · 저산소증 · 출혈 · 오투약 등 즉시 위해 기준으로
              가장 위험한 오류 5개를 선택하세요. 선택 순서가 우선순위가 됩니다.</p>
           <div class="prio-list" id="prioList">
@@ -584,6 +610,7 @@
         </div>
       </div>`;
     app.querySelector('#backRoom').addEventListener('click', viewRoom);
+    bindExit();
     const order = [...(S.session.priorities || [])];
     const rerank = () => {
       app.querySelectorAll('.prio-item').forEach((el) => {
@@ -642,9 +669,9 @@
     const sb = S.session.sbar || {};
     app.innerHTML = `
       <div class="page-narrow">
-        <a class="back" id="backPrio">← 우선순위화로</a>
+        ${exitBarHTML('backPrio', '← 우선순위화로')}
         <div class="panel">
-          <h2>SBAR 구두보고 준비</h2>
+          <h2>SBAR 구두보고 준비 ${previewBadge()}</h2>
           <p class="muted">가장 위험한 오류 1~2개를 SBAR 형식으로 교수자에게 보고합니다. 2분 이내로 작성하세요.</p>
           <div class="sbar-form">
             ${SBAR_ROWS.map(([k, label, ph]) => `
@@ -724,6 +751,12 @@
       await saveSbar();
       viewPriority();
     });
+    // 중간에 나가더라도 작성한 내용을 먼저 저장한다.
+    app.querySelector('#exitNow').addEventListener('click', async () => {
+      if (!isPreview() && !window.confirm('실습을 중단하고 사례 선택 화면으로 나갈까요?\n\n지금까지 작성한 내용은 저장되어 있으며, 나중에 이어서 할 수 있습니다.')) return;
+      await saveSbar();
+      viewHome();
+    });
     app.querySelector('#toReflect').addEventListener('click', async () => {
       if (!(await saveSbar())) return toast('저장에 실패했습니다. 연결 확인 후 다시 시도하세요.', 'warn');
       viewReflection();
@@ -736,9 +769,9 @@
     const r = S.session.reflection || {};
     app.innerHTML = `
       <div class="page-narrow">
-        <a class="back" id="backSbar">← SBAR로</a>
+        ${exitBarHTML('backSbar', '← SBAR로')}
         <div class="panel">
-          <h2>개인 성찰 기록</h2>
+          <h2>개인 성찰 기록 ${previewBadge()}</h2>
           <div class="reflect-form">
             ${REFLECT_ROWS.map(([k, label]) => `
               <label>${label}<textarea data-r="${k}">${esc(r[k])}</textarea></label>`).join('')}
@@ -809,6 +842,11 @@
       await saveRefl();
       viewSbar();
     });
+    app.querySelector('#exitNow').addEventListener('click', async () => {
+      if (!isPreview() && !window.confirm('실습을 중단하고 사례 선택 화면으로 나갈까요?\n\n지금까지 작성한 내용은 저장되어 있으며, 나중에 이어서 할 수 있습니다.')) return;
+      await saveRefl();
+      viewHome();
+    });
     app.querySelector('#submitAll').addEventListener('click', async () => {
       if (!(await saveRefl())) return toast('저장에 실패했습니다. 연결 확인 후 다시 시도하세요.', 'warn');
       await API.submit(S.session.id);
@@ -836,6 +874,8 @@
             <span>${score.total}<small>/100</small></span>
           </div>
         </div>
+        ${isPreview() ? `<p class="preview-note">교수자 미리보기 결과입니다. 아래 점수는 화면 확인용이며,
+          <b>학생 채점 목록과 성적 내보내기에는 포함되지 않습니다.</b></p>` : ''}
 
         <div class="score-cards">
           ${score.rubric.map((r) => `

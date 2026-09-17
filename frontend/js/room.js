@@ -56,7 +56,7 @@
             <button class="vr-logo" id="btnExit" title="사례 선택으로"><img src="assets/kyungmin-logo.png" alt="경민대학교" /></button>
             <div>
               <strong>경민대학교 간호학과 통합시뮬레이션수업</strong>
-              <em><span class="vr-credit">Room of Errors · 김정호 교수 제작</span><span class="vr-case"> · CASE ${m.caseId} · ${m.subtitle || ''}</span></em>
+              <em><span class="vr-credit">Room of Errors · 김정호 교수 제작</span><span class="vr-case"> · CASE ${m.caseId} · ${m.subtitle || ''}</span>${m.preview ? '<span class="vr-preview">교수자 미리보기 · 채점 반영 안 됨</span>' : ''}</em>
             </div>
           </div>
           <div class="vr-tools">
@@ -65,7 +65,8 @@
             <button class="vr-btn" id="btnPractice">💡 연습 힌트</button>
             <button class="vr-btn" id="btnList">기록지</button>
             <button class="vr-btn" id="btnHide">표식 숨기기</button>
-            <button class="vr-btn primary" id="btnFinish">관찰 종료 →</button>
+            <button class="vr-btn leave" id="btnLeave">✕ 나가기</button>
+            <button class="vr-btn primary" id="btnFinish">다음 단계 →</button>
           </div>
         </div>
 
@@ -74,7 +75,7 @@
           <div class="vr-jump-btns" id="jumpBtns"></div>
         </div>
         <div class="vr-jump-hint">${this.isMobile ? '← 좌우로 밀어 병실 탐색 · 번호를 눌러 바로가기 →' : `↔ 아래 1–${m.count} 바로가기 또는 표식을 클릭`}</div>
-        <div class="vr-guide">번호를 눌러 오류를 기록하세요 <span>· 1개 이상 기록 후 관찰 종료</span></div>
+        <div class="vr-guide">번호를 눌러 오류를 기록하세요 <span>· 1개 이상 기록하면 <b>다음 단계</b>(우선순위화)로 넘어갑니다 · 언제든 <b>나가기</b>로 중단할 수 있어요</span></div>
 
         <div class="vr-controls">
           <button class="vr-ctl on" id="ctlTilt">기울여 보기</button>
@@ -99,6 +100,7 @@
       this.el.querySelector('#btnInfo').onclick = () => this.onInfo();
       this.el.querySelector('#btnList').onclick = () => this.onList();
       this.el.querySelector('#btnExit').onclick = () => { this._dispose(); this.onExit(); };
+      this.el.querySelector('#btnLeave').onclick = () => { this._dispose(); this.onExit(); };
       this.el.querySelector('#btnFinish').onclick = async () => {
         await this.onFinish();
         if (!document.body.classList.contains('in-room')) this._dispose();
