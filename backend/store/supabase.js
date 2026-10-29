@@ -269,7 +269,7 @@ async function listProfilesByIds(token, ids) {
   const out = [];
   for (let i = 0; i < unique.length; i += 200) {
     const { data, error } = await client(token).from('roe_profiles')
-      .select('user_id,full_name,student_number,grade,class_name').in('user_id', unique.slice(i, i + 200));
+      .select('user_id,full_name,student_number,grade,class_name,role').in('user_id', unique.slice(i, i + 200));
     if (error) throw error;
     out.push(...(data || []));
   }

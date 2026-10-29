@@ -83,10 +83,16 @@ function hasContent(s) {
   return (s.findings || []).some((f) => f.flagged) || (s.priorities || []).length > 0
     || Object.values(s.sbar || {}).some((v) => String(v || '').trim());
 }
+// 대표 기록 선택용 진행도: 상태가 우선이고, 같은 상태면 더 많이 진행한 기록(성찰 > SBAR > 우선순위 > 탐지 수)
 function sessionRank(s) {
   const st = STATUS_RANK[s.status] || 0;
-  return st === 1 && !hasContent(s) ? 0 : st;
+  const flagged = (s.findings || []).filter((f) => f.flagged).length;
+  const refl = Object.values(s.reflection || {}).some((v) => String(v || '').trim()) ? 1 : 0;
+  const sbar = Object.values(s.sbar || {}).some((v) => String(v || '').trim()) ? 1 : 0;
+  const prio = (s.priorities || []).length ? 1 : 0;
+  return st * 100000 + refl * 10000 + sbar * 1000 + prio * 100 + flagged;
 }
+const VALID_CLASSES = ['A1', 'B1', 'C1', 'D1', 'A2', 'B2', 'C2', 'D2'];
 
 async function buildScoreRows(token, filter = {}) {
   const sessions = (await db.listSessions(token, { caseId: filter.caseId, className: filter.className }))
@@ -94,11 +100,17 @@ async function buildScoreRows(token, filter = {}) {
   const profiles = await db.listProfilesByIds(token, sessions.map((s) => s.studentUserId)).catch(() => []);
   const byUser = Object.fromEntries(profiles.map((p) => [p.user_id, p]));
 
-  let picked = sessions;
+  // 기본 보기에서는 교수자 계정의 기록과 정식 분반이 아닌 기록(초기 테스트 등)을 채점 목록에서 뺀다.
+  let base = sessions;
+  if (filter.view !== 'all') {
+    base = sessions.filter((s) => VALID_CLASSES.includes(s.className)
+      && !['admin', 'faculty'].includes(byUser[s.studentUserId]?.role));
+  }
+  let picked = base;
   const attempts = {};
   if (filter.view !== 'all') {
     const best = {};
-    for (const s of sessions) {
+    for (const s of base) {
       const k = `${s.studentUserId}|${s.caseId}`;
       attempts[k] = (attempts[k] || 0) + 1;
       const cur = best[k];

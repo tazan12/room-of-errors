@@ -1064,7 +1064,7 @@
         </div>
         ${PF.caseId && absent.length ? `<details class="absent-list"><summary>CASE ${esc(PF.caseId)} 미참여 학생 ${absent.length}명 보기</summary>
           <p>${absent.map((s) => `<span class="absent-chip">${esc(s.class_name)} · ${esc(s.student_number || '-')} ${esc(s.full_name || '')}</span>`).join('')}</p></details>` : ''}
-        <p class="muted grade-help">${PF.view === 'all' ? '학생이 만든 모든 기록을 보여 줍니다.' : '학생·사례별로 대표 기록 1건(채점 완료 → 제출 → 작성 중 순, 같으면 최신)만 보여 줍니다. 시도가 여러 번이면 "시도 n" 표시가 붙습니다.'}
+        <p class="muted grade-help">${PF.view === 'all' ? '학생이 만든 모든 기록을 보여 줍니다.' : '학생·사례별로 대표 기록 1건(채점 완료 → 제출 → 작성 중 순, 같은 상태면 성찰·SBAR·우선순위까지 더 많이 진행한 기록)만 보여 줍니다. 시도가 여러 번이면 "시도 n" 표시가 붙고, 교수자 계정·분반 외 테스트 기록은 빠집니다.'}
           탐지40·고위험15는 자동 채점, 우선15·SBAR15·팀10·성찰5는 직접 입력합니다. <b>작성 내용 보기</b>에서 학생 기록과 정답 대비 결과를 보며 채점하고 다음 학생으로 넘어갈 수 있습니다.</p>
         <div class="export-bar">
           <span class="muted">내보내기(현재 필터 기준):</span>
