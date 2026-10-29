@@ -215,6 +215,25 @@ app.put('/api/admin/students/:userId/profile', requireAuth, requireAdmin, async 
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+const idList = (body) => [...new Set((Array.isArray(body?.userIds) ? body.userIds : []).filter((x) => typeof x === 'string' && x.length > 0 && x.length <= 64))];
+
+/* 재등록 요청: 학생 정보만 비워 다시 등록·승인받게 한다(계정·실습 기록 유지). */
+app.post('/api/admin/students/reset', requireAuth, requireAdmin, async (req, res) => {
+  const ids = idList(req.body);
+  if (!ids.length) return res.status(400).json({ error: '대상 학생을 선택하세요.' });
+  try { res.json(await db.adminResetStudents(req.auth.token, ids)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* 완전 삭제: 로그인 계정·학생 정보·실습 기록을 모두 지운다(되돌릴 수 없음). */
+app.post('/api/admin/students/delete', requireAuth, requireAdmin, async (req, res) => {
+  const ids = idList(req.body);
+  if (!ids.length) return res.status(400).json({ error: '대상 학생을 선택하세요.' });
+  if (req.body?.confirm !== '삭제') return res.status(400).json({ error: '확인 문구가 올바르지 않습니다.' });
+  try { res.json(await db.adminDeleteStudents(req.auth.token, ids)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/admin/students/:userId/release-student-number', requireAuth, requireAdmin, async (req, res) => {
   try { await db.releaseStudentNumber(req.auth.token, req.params.userId); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }

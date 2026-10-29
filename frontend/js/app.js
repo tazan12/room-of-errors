@@ -1111,6 +1111,16 @@
             <label class="pf-search">검색<input id="st-q" placeholder="이름·학번" value="${esc(PF.sq)}"></label>
             <label class="pf-check"><input type="checkbox" id="onlyNeedsCheck" ${PF.needsOnly ? 'checked' : ''}> 확인 필요만(정보 미입력·임시 학번·승인 대기·거절)</label>
           </div>
+          ${API.isAdmin() ? `<div class="bulk-bar" id="bulkBar" hidden>
+            <span><b id="pickCount">0</b>명 선택</span>
+            <button class="btn tiny ghost" id="pickAll">보이는 학생 모두 선택</button>
+            <button class="btn tiny ghost" id="pickNone">선택 해제</button>
+            <span class="spacer"></span>
+            <button class="btn tiny ghost" id="bulkReset">선택 학생 재등록 요청</button>
+            <button class="btn tiny ghost danger" id="bulkDelete">선택 학생 완전 삭제</button>
+          </div>
+          <p class="muted small-note">재등록 요청: 학번·학년·분반을 비워 학생이 다음 접속 때 다시 등록하고 승인을 받습니다(실습 기록 유지).
+            완전 삭제: 로그인 계정과 실습 기록까지 모두 지웁니다. 같은 Google 계정으로 다시 로그인하면 새로 등록할 수 있습니다. 되돌릴 수 없습니다.</p>` : ''}
           <div id="studentList"></div>
         </div>`;
     }
@@ -1120,16 +1130,57 @@
       const tempNumber = String(r.student_number || '').startsWith('임시');
       const statusLabel = incomplete ? '정보 미입력' : ({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.approval_status] || r.approval_status);
       return `<div class="faculty-row" data-student-row="${r.user_id}">
-        <span><b>${esc(r.full_name || '이름 미등록')}</b>${tempNumber ? ' <em class="badge-warn">학번 확인 필요</em>' : ''}
+        <span>${API.isAdmin() ? `<input type="checkbox" class="st-pick" data-pick="${r.user_id}" ${picked.has(r.user_id) ? 'checked' : ''} aria-label="선택">` : ''}<b>${esc(r.full_name || '이름 미등록')}</b>${tempNumber ? ' <em class="badge-warn">학번 확인 필요</em>' : ''}
           <small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyName(r.faculty_user_id))} · <span class="st-${incomplete ? 'none' : r.approval_status}">${esc(statusLabel)}</span></small></span>
         <span>
-          ${API.isAdmin() ? `<button class="btn tiny" data-edit-student="${r.user_id}">정보 수정</button><select data-student-class="${r.user_id}"><option value="">분반 선택</option>${CLASS_NAMES.map((c) => `<option value="${c}" ${r.class_name === c ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn tiny ghost" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
+          ${API.isAdmin() ? `<button class="btn tiny" data-edit-student="${r.user_id}">정보 수정</button>
+            <details class="row-more"><summary class="btn tiny ghost">더보기 ▾</summary><div class="row-more-menu">
+              <span class="move-line"><select data-student-class="${r.user_id}"><option value="">분반 선택</option>${CLASS_NAMES.map((c) => `<option value="${c}" ${r.class_name === c ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn tiny ghost" data-move-student="${r.user_id}">분반 이동</button></span>
+              <button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>
+              <button class="btn tiny ghost" data-reset-student="${r.user_id}">재등록 요청 <small class="muted">(기록 유지)</small></button>
+              <button class="btn tiny ghost danger" data-delete-student="${r.user_id}">완전 삭제 <small class="muted">(계정·기록 삭제)</small></button>
+            </div></details>` : ''}
           ${incomplete
             ? `<small class="muted">${API.isAdmin() ? '정보 수정으로 직접 등록 가능' : '학생이 정보를 저장하면 승인할 수 있습니다'}</small>`
             : `${r.approval_status !== 'approved' ? `<button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button>` : ''}${r.approval_status !== 'rejected' ? `<button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>` : ''}`}
         </span>
       </div>`;
     }
+
+    const picked = new Set();
+    let shownStudents = [];
+    function updatePickUI() {
+      const bar = app.querySelector('#bulkBar');
+      if (!bar) return;
+      bar.hidden = false;
+      app.querySelector('#pickCount').textContent = picked.size;
+      app.querySelector('#bulkReset').disabled = !picked.size;
+      app.querySelector('#bulkDelete').disabled = !picked.size;
+    }
+    const nameOf = (uid) => students.find((s) => s.user_id === uid)?.full_name || '이름 미등록';
+    async function resetStudentsFlow(ids) {
+      const names = ids.map(nameOf);
+      if (!window.confirm(`${names.length}명(${names.slice(0, 5).join(', ')}${names.length > 5 ? ' 외' : ''})에게 재등록을 요청할까요?\n\n학번·학년·분반·지도교수가 비워지고 승인 대기로 바뀝니다. 학생은 다음 접속 때 정보를 다시 입력해야 하며, 실습 기록은 그대로 남습니다.`)) return;
+      try { const done = await API.resetStudents(ids); toast(`${done.length}명 재등록 요청 완료`, 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '재등록 요청 실패', 'warn'); }
+    }
+    async function deleteStudentsFlow(ids) {
+      const names = ids.map(nameOf);
+      const typed = window.prompt(`${names.length}명(${names.slice(0, 5).join(', ')}${names.length > 5 ? ' 외' : ''})을 시스템에서 완전히 삭제합니다.\n\n로그인 계정, 학생 정보, 모든 실습 기록과 점수가 지워지며 되돌릴 수 없습니다.\n계속하려면 아래에 "삭제"라고 입력하세요.`);
+      if (typed === null) return;
+      if (typed.trim() !== '삭제') return toast('확인 문구가 달라 삭제하지 않았습니다.', 'warn');
+      try {
+        const done = await API.deleteStudents(ids, '삭제');
+        const skipped = ids.length - done.length;
+        const recs = done.reduce((n, d) => n + (d.sessions_deleted || 0), 0);
+        toast(`${done.length}명 삭제(실습 기록 ${recs}건)${skipped ? ` · ${skipped}명은 교수자 계정이라 제외` : ''}`, skipped ? 'warn' : 'ok');
+        viewProfessor();
+      } catch (e) { toast(e.message || '삭제 실패', 'warn'); }
+    }
+    app.querySelector('#pickAll')?.addEventListener('click', () => { shownStudents.forEach((s) => picked.add(s.user_id)); renderStudents(); });
+    app.querySelector('#pickNone')?.addEventListener('click', () => { picked.clear(); renderStudents(); });
+    app.querySelector('#bulkReset')?.addEventListener('click', () => picked.size && resetStudentsFlow([...picked]));
+    app.querySelector('#bulkDelete')?.addEventListener('click', () => picked.size && deleteStudentsFlow([...picked]));
 
     function renderStudents() {
       const box = app.querySelector('#studentList');
@@ -1141,9 +1192,11 @@
         .sort((a, b) => Number(needsCheck(b)) - Number(needsCheck(a))
           || String(a.class_name || '~').localeCompare(String(b.class_name || '~'))
           || String(a.student_number || '~').localeCompare(String(b.student_number || '~')));
+      shownStudents = list;
       box.innerHTML = list.length ? list.map(studentRowHTML).join('')
         : `<p class="muted">${PF.needsOnly ? '확인이 필요한 학생이 없습니다. 체크를 해제하면 전체 학생을 볼 수 있습니다.' : '조건에 맞는 학생이 없습니다.'}</p>`;
       bindStudentRows();
+      updatePickUI();
     }
 
     /* ---------- 교수자 관리 탭(총괄) ---------- */
@@ -1312,6 +1365,12 @@
 
     function bindStudentRows() {
       const box = app.querySelector('#studentList');
+      box.querySelectorAll('[data-pick]').forEach((cb) => cb.addEventListener('change', () => {
+        if (cb.checked) picked.add(cb.dataset.pick); else picked.delete(cb.dataset.pick);
+        updatePickUI();
+      }));
+      box.querySelectorAll('[data-reset-student]').forEach((btn) => btn.addEventListener('click', () => resetStudentsFlow([btn.dataset.resetStudent])));
+      box.querySelectorAll('[data-delete-student]').forEach((btn) => btn.addEventListener('click', () => deleteStudentsFlow([btn.dataset.deleteStudent])));
       box.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
         if (btn.dataset.decision === 'rejected' && !window.confirm('이 학생의 사용 신청을 거절할까요? 거절된 학생은 사례에 입장할 수 없습니다.')) return;
         try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }

@@ -102,6 +102,8 @@ const API = (() => {
     studentNumberConflicts: () => req('GET', '/api/admin/student-number-conflicts'),
     resolveStudentNumberConflict: (id) => req('POST', `/api/admin/student-number-conflicts/${id}/resolve`),
     adminUpdateStudent: (userId, data) => req('PUT', `/api/admin/students/${userId}/profile`, data),
+    resetStudents: (userIds) => req('POST', '/api/admin/students/reset', { userIds }),
+    deleteStudents: (userIds, confirm) => req('POST', '/api/admin/students/delete', { userIds, confirm }),
     releaseStudentNumber: (userId) => req('POST', `/api/admin/students/${userId}/release-student-number`),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
