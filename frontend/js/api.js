@@ -126,6 +126,7 @@ const API = (() => {
     getCase: (id) => req('GET', `/api/cases/${id}`),
     getAnswers: (id) => req('GET', `/api/cases/${id}/answers`),
     createSession: (data) => req('POST', '/api/sessions', data),
+    mySessions: (caseId) => req('GET', `/api/sessions/mine?caseId=${encodeURIComponent(caseId || '')}`),
     getSession: (id) => req('GET', `/api/sessions/${id}`),
     saveFindings: (id, findings) => req('PUT', `/api/sessions/${id}/findings`, { findings }),
     savePriorities: (id, priorities) => req('PUT', `/api/sessions/${id}/priorities`, { priorities }),

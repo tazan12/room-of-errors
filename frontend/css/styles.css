@@ -701,3 +701,49 @@ textarea { resize: vertical; min-height: 60px; }
 .student-edit label { display: flex; flex-direction: column; font-size: 12px; gap: 3px; }
 .student-edit input, .student-edit select { min-width: 110px; }
 .student-edit small { flex-basis: 100%; }
+
+/* ---------- 교수자 대시보드: 탭·필터·상태 ---------- */
+.tab-bar { display: flex; gap: 6px; margin: 4px 0 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tab-btn { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 10px 14px; font: inherit; font-size: 14px; cursor: pointer; margin-bottom: -1px; }
+.tab-btn.on { color: var(--text); border-bottom-color: var(--aqua); font-weight: 650; }
+.tab-badge { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 4px; border-radius: 999px; background: var(--coral); color: #1a1a1a; font-size: 11px; font-weight: 700; }
+.prof-filter { flex-wrap: wrap; }
+.prof-filter select, .prof-filter input:not([type=checkbox]) { padding: 7px 10px; border-radius: 10px; }
+.pf-search input { min-width: 180px; }
+.pf-check { cursor: pointer; }
+.status-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 10px; }
+.chip { border: 1px solid var(--line2); background: var(--panel2); color: var(--text); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.chip b { margin-left: 4px; color: var(--aqua); }
+.chip.on { background: var(--aqua); color: var(--aqua-deep); border-color: var(--aqua); }
+.chip.on b { color: var(--aqua-deep); }
+.ghost-chip { cursor: default; background: transparent; }
+.small-note { font-size: 12px; }
+.grade-help { font-size: 13px; margin: 6px 0 12px; }
+.absent-list { margin: 0 0 12px; font-size: 13px; }
+.absent-list summary { cursor: pointer; color: var(--amber); }
+.absent-chip { display: inline-block; margin: 4px 6px 0 0; padding: 3px 8px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); }
+.export-bar .spacer { flex: 1; }
+.table-scroll { width: 100%; overflow-x: auto; border-radius: 16px; }
+.table-scroll .prof-table { min-width: 1100px; }
+.status-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.status-pill.reporting { background: rgba(245,191,85,.18); color: var(--amber); }
+.status-pill.scored { background: rgba(87,213,209,.16); color: var(--aqua); }
+.status-pill.exploring { background: rgba(255,255,255,.08); color: var(--muted); }
+.prof-table tr.row-empty td { color: var(--muted2); }
+.prof-table tr.row-dirty td { background: rgba(245,191,85,.10); }
+.prof-table td.row-actions { white-space: nowrap; }
+.st-pending { color: var(--amber); } .st-rejected { color: var(--danger); } .st-none { color: var(--coral); }
+.detail-nav { display: flex; align-items: center; gap: 10px; margin: 0 40px 10px 0; }
+.rubric-desc { display: block; color: var(--muted2); font-size: 12px; margin-top: 2px; max-width: 460px; }
+.score-input { display: inline-flex; gap: 6px; align-items: center; }
+.answer-key { margin-top: 10px; font-size: 13px; }
+.answer-key summary { cursor: pointer; color: var(--amber); margin-bottom: 6px; }
+.resume-box { margin: 18px 0 14px; padding: 14px 16px; border: 1px solid var(--aqua); border-radius: 14px; background: rgba(87,213,209,.06); }
+.resume-box h4 { margin: 0 0 4px; color: var(--aqua); }
+.resume-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.resume-row:first-of-type { border-top: 0; }
+@media (max-width: 720px) {
+  .resume-row { flex-direction: column; align-items: stretch; }
+  .pf-search input { min-width: 0; width: 100%; }
+}
+.table-scroll .prof-table th, .table-scroll .prof-table td { white-space: nowrap; }

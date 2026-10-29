@@ -9,8 +9,10 @@
 const XLSX = require('xlsx');
 
 const COLUMNS = [
-  { key: 'caseId', label: '사례' },
   { key: 'className', label: '반' },
+  { key: 'studentNumber', label: '학번' },
+  { key: 'studentName', label: '이름' },
+  { key: 'caseId', label: '사례' },
   { key: 'teamName', label: '조' },
   { key: 'members', label: '조원' },
   { key: 'status', label: '상태' },
@@ -23,10 +25,13 @@ const COLUMNS = [
   { key: 'teamwork', label: '팀워크(10)' },
   { key: 'reflection', label: '성찰(5)' },
   { key: 'total', label: '총점(100)' },
-  { key: 'createdAt', label: '생성일시' },
+  { key: 'submittedAt', label: '제출일시' },
+  { key: 'attempts', label: '시도수' },
 ];
 
-const STATUS_KR = { exploring: '관찰중', reporting: '보고완료', scored: '채점완료' };
+const STATUS_KR = { exploring: '작성 중', reporting: '제출(채점 대기)', scored: '채점 완료' };
+// 서버는 UTC로 저장하므로 한국 시간으로 바꿔 표기한다.
+const kst = (iso) => (iso ? new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString().slice(0, 16).replace('T', ' ') : '');
 
 /** 세션 rows(교수 대시보드 형태) → 평면 레코드 배열 */
 function flatten(rows) {
@@ -35,6 +40,8 @@ function flatten(rows) {
     return {
       caseId: 'CASE ' + r.caseId,
       className: r.className || '',
+      studentNumber: r.studentNumber || '',
+      studentName: r.studentName || '',
       teamName: r.teamName || '',
       members: (r.members || []).join(', '),
       status: STATUS_KR[r.status] || r.status || '',
@@ -47,7 +54,8 @@ function flatten(rows) {
       teamwork: b.teamwork ?? 0,
       reflection: b.reflection ?? 0,
       total: r.total ?? '',
-      createdAt: (r.createdAt || '').replace('T', ' ').slice(0, 16),
+      submittedAt: kst(r.submittedAt),
+      attempts: r.attempts ?? 1,
     };
   });
 }
@@ -90,7 +98,7 @@ function toDoc(rows, title) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
   <style>body{font-family:'맑은 고딕','Malgun Gothic',sans-serif;}
   h1{font-size:18pt;} table{border-collapse:collapse;font-size:9pt;} th{background:#dce6f1;}</style>
-  </head><body><h1>${title}</h1><p>생성: ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</p>
+  </head><body><h1>${title}</h1><p>생성: ${kst(new Date().toISOString())}</p>
   ${tableHTML(rows)}</body></html>`;
 }
 
@@ -109,7 +117,7 @@ function reportHTML(rows, title) {
   </style></head><body>
   <div class="toolbar"><button onclick="window.print()">🖨️ 인쇄 / PDF로 저장</button></div>
   <h1>${title}</h1>
-  <div class="sub">경민대학교 통합시뮬레이션수업 · Room of Errors · 생성 ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</div>
+  <div class="sub">경민대학교 통합시뮬레이션수업 · Room of Errors · 생성 ${kst(new Date().toISOString())}</div>
   ${tableHTML(rows)}
   </body></html>`;
 }

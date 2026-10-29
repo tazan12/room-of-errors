@@ -239,6 +239,11 @@
     const instructor = API.isInstructor();
     // 교수자·관리자는 조 정보(분반·조이름·조원)를 입력하지 않고 바로 입장한다.
     const routes = instructor ? [] : (await API.facultyRoutes()).filter((r) => r.classes?.length);
+    // 같은 사례를 다시 열면 새 기록을 만들지 않고 이어서 할 수 있게 기존 기록을 보여 준다.
+    const statusRank = (s) => ({ scored: 3, reporting: 2 }[s.status] || (s.hasContent ? 1 : 0));
+    const mine = instructor ? [] : (await API.mySessions(caseId).catch(() => []))
+      .sort((a, b) => statusRank(b) - statusRank(a) || String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 3);
+    const resumeLabel = { exploring: '작성 중', reporting: '제출 완료', scored: '채점 완료' };
     app.innerHTML = `
       <div class="page-narrow">
         <a class="back" data-route="home">← 사례 선택으로</a>
@@ -267,12 +272,30 @@
               <label class="full">조원(쉼표로 구분) <input id="f-members" placeholder="홍길동, 김간호, ..." value="${esc(profile.full_name || '')}" /></label>
             </div>
           `}
-          <button class="btn primary lg" id="startBtn">${instructor ? '병실 입장(미리보기) →' : '병실 입장 →'}</button>
+          ${mine.length ? `<div class="resume-box">
+            <h4>이전에 하던 기록이 있습니다</h4>
+            <p class="muted">새로 시작하지 말고 이어서 하세요. 교수님은 학생별 대표 기록 1건으로 채점합니다.</p>
+            ${mine.map((s) => `<div class="resume-row">
+              <span><b>${esc(resumeLabel[s.status] || s.status)}</b> · ${esc(s.className)} ${esc(s.teamName || '')} · 오류 기록 ${s.findings}건 · 마지막 저장 ${esc(new Date(s.updatedAt || s.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</span>
+              <button class="btn ${s === mine[0] ? 'primary' : 'ghost'}" data-resume="${s.id}">${s.status === 'exploring' ? '이어서 하기 →' : '결과 보기 →'}</button>
+            </div>`).join('')}
+          </div>` : ''}
+          <button class="btn ${mine.length ? 'ghost' : 'primary'} lg" id="startBtn">${instructor ? '병실 입장(미리보기) →' : (mine.length ? '새 기록으로 처음부터 시작' : '병실 입장 →')}</button>
         </div>
       </div>`;
     app.querySelector('[data-route="home"]').addEventListener('click', viewHome);
+    app.querySelectorAll('[data-resume]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        S.session = await API.getSession(b.dataset.resume);
+        saveLocal();
+        if (S.session.status === 'exploring') viewRoom(); else viewResult();
+      } catch (e) { b.disabled = false; toast(e.message || '기록을 불러오지 못했습니다.', 'warn'); }
+    }));
     app.querySelector('#startBtn').addEventListener('click', async () => {
       const btn = app.querySelector('#startBtn');
+      if (mine.some((s) => s.status !== 'exploring' || s.findings > 0)
+        && !window.confirm('이미 이 사례에 작성한 기록이 있습니다.\n새로 시작하면 별도의 빈 기록이 만들어집니다. 정말 처음부터 시작할까요?')) return;
       btn.disabled = true;
       try {
         let payload = { caseId };
@@ -921,13 +944,13 @@
             <p class="save-help muted">위 내용이 교수자 화면에 그대로 전달되어 채점됩니다.</p>
             <div class="result-actions">
               <button class="btn ghost" id="again">다른 사례 하기</button>
-              <button class="btn primary" id="toProf">교수 대시보드에서 채점</button>
+              ${API.isInstructor() ? '<button class="btn primary" id="toProf">교수 대시보드에서 채점</button>' : ''}
             </div>
           </div>
         </div>
       </div>`;
     app.querySelector('#again').addEventListener('click', viewHome);
-    app.querySelector('#toProf').addEventListener('click', () => viewProfessor(S.caseId));
+    app.querySelector('#toProf')?.addEventListener('click', () => viewProfessor(S.caseId));
   }
 
   /* ---------- 관리자 로그인 ---------- */
@@ -939,32 +962,69 @@
     viewLogin('admin');
   }
 
-  /* ================= 화면: 관리자 대시보드 ================= */
+  /* ================= 화면: 교수자·총괄관리자 대시보드 =================
+   * 탭: 채점 | 학생 관리 | (총괄) 교수자 관리
+   * 채점 목록은 기본적으로 학생·사례별 대표 기록 1건만 보여 준다(서버 view=latest). */
+  const CLASS_NAMES = ['A1', 'B1', 'C1', 'D1', 'A2', 'B2', 'C2', 'D2'];
+  const STATUS_LABEL = { exploring: '작성 중', reporting: '채점 대기', scored: '채점 완료' };
+  const MANUAL_KEYS = [['priority', 15], ['sbar', 15], ['teamwork', 10], ['reflection', 5]];
+  const PF = Object.assign(
+    { tab: 'grade', caseId: '', className: '', status: 'all', view: 'latest', q: '', needsOnly: true, sq: '', sClass: '' },
+    (() => { try { return JSON.parse(sessionStorage.getItem('roe_pf') || '{}'); } catch (e) { return {}; } })(),
+  );
+  const savePF = () => { try { sessionStorage.setItem('roe_pf', JSON.stringify(PF)); } catch (e) { /* 무시 */ } };
+  const fmtTime = (t) => (t ? new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  const profileIncomplete = (r) => !(r.student_number && r.grade && r.class_name && r.faculty_user_id);
+  const needsCheck = (r) => profileIncomplete(r) || String(r.student_number || '').startsWith('임시') || r.approval_status !== 'approved';
+
   async function viewProfessor(preCase, preClass) {
     if (!API.isInstructor()) return openAdminLogin();
     document.body.classList.remove('in-room');
+    if (preCase !== undefined) { PF.caseId = preCase || ''; PF.tab = 'grade'; }
+    if (preClass !== undefined) PF.className = preClass || '';
+    savePF();
+    app.innerHTML = '<div class="page-wide"><p class="muted">대시보드를 불러오는 중…</p></div>';
+
+    const query = { view: PF.view, ...(PF.caseId ? { caseId: PF.caseId } : {}), ...(PF.className ? { className: PF.className } : {}) };
     const [sessionsResult, facultyResult, studentsResult, routesResult, conflictsResult] = await Promise.allSettled([
-      API.professorSessions({ ...(preCase ? { caseId: preCase } : {}), ...(preClass ? { className: preClass } : {}) }),
+      API.professorSessions(query),
       API.isAdmin() ? API.facultyRequests() : Promise.resolve([]),
       API.studentApprovals(),
       API.facultyRoutes(),
       API.studentNumberConflicts(),
     ]);
-    const rows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
+    const allRows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
     const facultyRequests = facultyResult.status === 'fulfilled' ? facultyResult.value : [];
-    const studentApprovals = studentsResult.status === 'fulfilled' ? studentsResult.value : [];
+    const students = studentsResult.status === 'fulfilled' ? studentsResult.value : [];
     const facultyRoutes = routesResult.status === 'fulfilled' ? routesResult.value : [];
     const conflicts = conflictsResult.status === 'fulfilled' ? conflictsResult.value : [];
-    const fmtTime = (t) => (t ? new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
-    const classNames = ['A1','B1','C1','D1','A2','B2','C2','D2'];
     const loadWarnings = [
       sessionsResult.status === 'rejected' ? `학생 실습 기록: ${sessionsResult.reason?.message || '불러오기 실패'}` : '',
       facultyResult.status === 'rejected' ? `교수자 승인 요청: ${facultyResult.reason?.message || '불러오기 실패'}` : '',
-      studentsResult.status === 'rejected' ? `학생 승인 요청: ${studentsResult.reason?.message || '불러오기 실패'}` : '',
+      studentsResult.status === 'rejected' ? `학생 목록: ${studentsResult.reason?.message || '불러오기 실패'}` : '',
     ].filter(Boolean);
-    const q = { ...(preCase ? { caseId: preCase } : {}), ...(preClass ? { className: preClass } : {}) };
+
+    const me = API.user()?.id;
+    const myClasses = API.isAdmin() ? CLASS_NAMES : (facultyRoutes.find((f) => f.user_id === me)?.classes || []);
+    const classOptions = API.isAdmin() ? CLASS_NAMES : myClasses;
+    const facultyName = (uid) => facultyRoutes.find((f) => f.user_id === uid)?.full_name || '-';
+    const needCount = students.filter(needsCheck).length + conflicts.length;
+    const pendingFaculty = facultyRequests.filter((r) => r.status === 'pending').length;
+    const counts = { all: allRows.length, reporting: 0, scored: 0, exploring: 0 };
+    allRows.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+    // 선택한 사례에 아직 기록이 없는 승인 학생(미참여)
+    const inScope = (s) => (PF.className ? s.class_name === PF.className : myClasses.includes(s.class_name));
+    const participated = new Set(allRows.map((r) => r.studentUserId));
+    const absent = PF.caseId
+      ? students.filter((s) => s.approval_status === 'approved' && inScope(s) && !participated.has(s.user_id))
+        .sort((a, b) => String(a.student_number || '').localeCompare(String(b.student_number || '')))
+      : [];
+
+    const tabBtn = (id, label, badge) => `<button class="tab-btn ${PF.tab === id ? 'on' : ''}" data-tab="${id}">${label}${badge ? ` <span class="tab-badge">${badge}</span>` : ''}</button>`;
+
     app.innerHTML = `
-      <div class="page-wide">
+      <div class="page-wide prof-page">
         <div class="result-head">
           <h2>${API.isAdmin() ? '총괄관리자 대시보드' : '교수자 대시보드'}</h2>
           <div>
@@ -972,12 +1032,68 @@
             <button class="btn ghost" id="admOut">로그아웃</button>
           </div>
         </div>
-        ${loadWarnings.length ? `<div class="panel"><p class="muted">관리자 로그인은 완료되었습니다. 일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
+        ${loadWarnings.length ? `<div class="panel"><p class="muted">일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
+        <div class="tab-bar">
+          ${tabBtn('grade', '채점', counts.reporting)}
+          ${tabBtn('students', '학생 관리', needCount)}
+          ${API.isAdmin() ? tabBtn('faculty', '교수자 관리', pendingFaculty) : ''}
+        </div>
+        <section data-pane="grade" ${PF.tab === 'grade' ? '' : 'hidden'}>${gradePaneHTML()}</section>
+        <section data-pane="students" ${PF.tab === 'students' ? '' : 'hidden'}>${studentsPaneHTML()}</section>
+        ${API.isAdmin() ? `<section data-pane="faculty" ${PF.tab === 'faculty' ? '' : 'hidden'}>${facultyPaneHTML()}</section>` : ''}
+      </div>
+      <div id="profModal" class="modal-back"></div>`;
+
+    /* ---------- 채점 탭 ---------- */
+    function gradePaneHTML() {
+      const chip = (id, label) => `<button class="chip ${PF.status === id ? 'on' : ''}" data-status="${id}">${label} <b>${counts[id] || 0}</b></button>`;
+      return `
+        <div class="prof-filter">
+          <label>사례
+            <select id="pf-case"><option value="">전체</option>${['A', 'B', 'C', 'D'].map((x) => `<option value="${x}" ${PF.caseId === x ? 'selected' : ''}>CASE ${x}</option>`).join('')}</select>
+          </label>
+          <label>분반
+            <select id="pf-class"><option value="">${API.isAdmin() ? '전체' : '담당 분반 전체'}</option>${classOptions.map((x) => `<option value="${x}" ${PF.className === x ? 'selected' : ''}>${x}</option>`).join('')}</select>
+          </label>
+          <label class="pf-search">학생 검색<input id="pf-q" placeholder="이름·학번·조" value="${esc(PF.q)}"></label>
+          <label class="pf-check"><input type="checkbox" id="pf-all" ${PF.view === 'all' ? 'checked' : ''}> 모든 시도 보기</label>
+        </div>
+        <div class="status-chips">
+          ${chip('all', '전체')}${chip('reporting', '채점 대기')}${chip('scored', '채점 완료')}${chip('exploring', '작성 중')}
+          ${PF.caseId ? `<span class="chip ghost-chip">미참여 <b>${absent.length}</b></span>` : '<span class="muted small-note">사례를 선택하면 미참여 학생도 확인할 수 있습니다.</span>'}
+        </div>
+        ${PF.caseId && absent.length ? `<details class="absent-list"><summary>CASE ${esc(PF.caseId)} 미참여 학생 ${absent.length}명 보기</summary>
+          <p>${absent.map((s) => `<span class="absent-chip">${esc(s.class_name)} · ${esc(s.student_number || '-')} ${esc(s.full_name || '')}</span>`).join('')}</p></details>` : ''}
+        <p class="muted grade-help">${PF.view === 'all' ? '학생이 만든 모든 기록을 보여 줍니다.' : '학생·사례별로 대표 기록 1건(채점 완료 → 제출 → 작성 중 순, 같으면 최신)만 보여 줍니다. 시도가 여러 번이면 "시도 n" 표시가 붙습니다.'}
+          탐지40·고위험15는 자동 채점, 우선15·SBAR15·팀10·성찰5는 직접 입력합니다. <b>작성 내용 보기</b>에서 학생 기록과 정답 대비 결과를 보며 채점하고 다음 학생으로 넘어갈 수 있습니다.</p>
+        <div class="export-bar">
+          <span class="muted">내보내기(현재 필터 기준):</span>
+          <a class="btn tiny" data-export="xlsx">📊 Excel</a>
+          <a class="btn tiny" data-export="csv">📄 CSV</a>
+          <a class="btn tiny" data-export="doc">📝 Word</a>
+          <a class="btn tiny" data-export="html">🖨️ PDF(인쇄)</a>
+          <span class="spacer"></span>
+          <button class="btn tiny primary" id="bulkSave" disabled>변경한 점수 저장 <b id="dirtyCount">0</b></button>
+        </div>
+        <div class="table-scroll">
+        <table class="prof-table">
+          <thead><tr>
+            <th>반</th><th>학번</th><th>이름</th><th>사례</th><th>조</th><th>상태</th><th>탐지</th><th>고위험</th>
+            <th>탐지40</th><th>고위험15</th><th>우선15</th><th>SBAR15</th><th>팀10</th><th>성찰5</th>
+            <th>총점</th><th>채점</th>
+          </tr></thead>
+          <tbody id="pf-body"></tbody>
+        </table>
+        </div>`;
+    }
+
+    /* ---------- 학생 관리 탭 ---------- */
+    function studentsPaneHTML() {
+      return `
         ${conflicts.length ? `<div class="panel faculty-approval conflict-panel">
           <h3>학번 중복으로 등록하지 못한 학생 <small class="muted">${conflicts.length}건</small></h3>
-          <p class="muted">아래 학생이 입력한 학번이 이미 다른 계정에 저장되어 있어 학생 정보 저장이 막혔습니다.
-            두 사람 중 누가 학번을 잘못 입력했는지 확인하세요.
-            ${API.isAdmin() ? '기존 등록자가 잘못 입력했다면 <b>기존 학번 해제</b>를 누르면 됩니다(해당 학생은 다음 접속 때 학번을 다시 입력). 신청 학생이 잘못 입력했다면 학생에게 알리고 <b>확인 완료</b>를 누르세요.' : '기존 등록 학번 해제는 총괄관리자에게 요청하세요.'}</p>
+          <p class="muted">아래 학생이 입력한 학번이 이미 다른 계정에 저장되어 있어 학생 정보 저장이 막혔습니다. 누가 학번을 잘못 입력했는지 확인하세요.
+            ${API.isAdmin() ? '기존 등록자가 잘못 입력했다면 <b>기존 학번 해제</b>, 신청 학생이 잘못 입력했다면 학생에게 알린 뒤 <b>확인 완료</b>를 누르세요. 급하면 신청 학생을 <b>정보 수정</b>으로 직접 등록할 수 있습니다.' : '기존 등록 학번 해제는 총괄관리자에게 요청하세요.'}</p>
           ${conflicts.map((c) => `<div class="faculty-row">
             <span><b>${esc(c.requester_name || '이름 미등록')} → 학번 ${esc(c.student_number)}</b>
               <small>신청: ${esc(c.requester_email)} · ${esc(fmtTime(c.attempted_at))} · 시도 ${esc(c.attempts)}회</small>
@@ -989,221 +1105,298 @@
           </div>`).join('')}
         </div>` : ''}
         <div class="panel faculty-approval">
-          <h3>학생 사용 승인 <small class="muted">${studentApprovals.filter((r) => !(r.student_number && r.grade && r.class_name && r.faculty_user_id) || String(r.student_number || '').startsWith('임시') || r.approval_status !== 'approved').length}건 확인 필요</small></h3>
-          <label class="muted needs-check-toggle"><input type="checkbox" id="onlyNeedsCheck"> 확인 필요만 보기(정보 미입력·임시 학번·승인 대기·거절)</label>
-          ${studentApprovals.length ? studentApprovals.map((r) => {
-            const incomplete = !(r.student_number && r.grade && r.class_name && r.faculty_user_id);
-            const tempNumber = String(r.student_number || '').startsWith('임시');
-            const statusLabel = incomplete ? '정보 미입력' : ({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.approval_status] || r.approval_status);
-            return `<div class="faculty-row" data-student-row="${r.user_id}">
-            <span><b>${esc(r.full_name || '이름 미등록')}</b>${tempNumber ? ' <em class="badge-warn">학번 확인 필요</em>' : ''}<small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(statusLabel)}</small></span>
-            <span>
-              ${API.isAdmin() ? `<select data-student-class="${r.user_id}"><option value="">분반 선택</option>${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c}</option>`).join('')}</select><button class="btn tiny" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
-              ${API.isAdmin() ? `<button class="btn tiny" data-edit-student="${r.user_id}">정보 수정</button>` : ''}
-              ${incomplete
-                ? `<small class="muted">${API.isAdmin() ? '정보 수정으로 직접 등록 가능' : '학생이 정보를 저장하면 승인할 수 있습니다'}</small>`
-                : `<button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>`}
-            </span>
-          </div>`;
-          }).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
-        </div>
-        ${API.isAdmin() ? `<div class="panel faculty-approval">
+          <h3>학생 목록 <small class="muted">전체 ${students.length}명 · 확인 필요 ${students.filter(needsCheck).length}명</small></h3>
+          <div class="prof-filter">
+            <label>분반<select id="st-class"><option value="">전체</option>${CLASS_NAMES.map((c) => `<option value="${c}" ${PF.sClass === c ? 'selected' : ''}>${c}</option>`).join('')}<option value="__none" ${PF.sClass === '__none' ? 'selected' : ''}>분반 없음</option></select></label>
+            <label class="pf-search">검색<input id="st-q" placeholder="이름·학번" value="${esc(PF.sq)}"></label>
+            <label class="pf-check"><input type="checkbox" id="onlyNeedsCheck" ${PF.needsOnly ? 'checked' : ''}> 확인 필요만(정보 미입력·임시 학번·승인 대기·거절)</label>
+          </div>
+          <div id="studentList"></div>
+        </div>`;
+    }
+
+    function studentRowHTML(r) {
+      const incomplete = profileIncomplete(r);
+      const tempNumber = String(r.student_number || '').startsWith('임시');
+      const statusLabel = incomplete ? '정보 미입력' : ({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.approval_status] || r.approval_status);
+      return `<div class="faculty-row" data-student-row="${r.user_id}">
+        <span><b>${esc(r.full_name || '이름 미등록')}</b>${tempNumber ? ' <em class="badge-warn">학번 확인 필요</em>' : ''}
+          <small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyName(r.faculty_user_id))} · <span class="st-${incomplete ? 'none' : r.approval_status}">${esc(statusLabel)}</span></small></span>
+        <span>
+          ${API.isAdmin() ? `<button class="btn tiny" data-edit-student="${r.user_id}">정보 수정</button><select data-student-class="${r.user_id}"><option value="">분반 선택</option>${CLASS_NAMES.map((c) => `<option value="${c}" ${r.class_name === c ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="btn tiny ghost" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
+          ${incomplete
+            ? `<small class="muted">${API.isAdmin() ? '정보 수정으로 직접 등록 가능' : '학생이 정보를 저장하면 승인할 수 있습니다'}</small>`
+            : `${r.approval_status !== 'approved' ? `<button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button>` : ''}${r.approval_status !== 'rejected' ? `<button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>` : ''}`}
+        </span>
+      </div>`;
+    }
+
+    function renderStudents() {
+      const box = app.querySelector('#studentList');
+      if (!box) return;
+      const q = PF.sq.trim().toLowerCase();
+      const list = students.filter((r) => (!PF.needsOnly || needsCheck(r))
+        && (!PF.sClass || (PF.sClass === '__none' ? !r.class_name : r.class_name === PF.sClass))
+        && (!q || [r.full_name, r.student_number].some((v) => String(v || '').toLowerCase().includes(q))))
+        .sort((a, b) => Number(needsCheck(b)) - Number(needsCheck(a))
+          || String(a.class_name || '~').localeCompare(String(b.class_name || '~'))
+          || String(a.student_number || '~').localeCompare(String(b.student_number || '~')));
+      box.innerHTML = list.length ? list.map(studentRowHTML).join('')
+        : `<p class="muted">${PF.needsOnly ? '확인이 필요한 학생이 없습니다. 체크를 해제하면 전체 학생을 볼 수 있습니다.' : '조건에 맞는 학생이 없습니다.'}</p>`;
+      bindStudentRows();
+    }
+
+    /* ---------- 교수자 관리 탭(총괄) ---------- */
+    function facultyPaneHTML() {
+      return `
+        <div class="panel faculty-approval">
           <h3>교수자 권한 신청</h3>
           ${facultyRequests.length ? facultyRequests.map((r) => `<div class="faculty-row">
-            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>${esc(r.email)} · ${esc(r.status)}</small></span>
+            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>${esc(r.email)} · ${esc({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.status] || r.status)}</small></span>
             ${r.status === 'pending' ? `<span><button class="btn tiny" data-faculty="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected">거절</button></span>` :
-              (r.status === 'approved' && r.user_id !== API.user()?.id ? `<span><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected" data-revoke-faculty="true">권한 회수</button></span>` : '')}
-          </div>`).join('') : '<p class="muted">새로운 교수자 신청이 없습니다.</p>'}
+              (r.status === 'approved' && r.user_id !== me ? `<span><button class="btn tiny ghost" data-faculty="${r.user_id}" data-decision="rejected" data-revoke-faculty="true">권한 회수</button></span>` : '')}
+          </div>`).join('') : '<p class="muted">교수자 신청이 없습니다.</p>'}
         </div>
         <div class="panel faculty-approval">
           <h3>교수자 분반 배정 <small class="muted">교수자당 최대 2개</small></h3>
           ${facultyRoutes.length ? facultyRoutes.map((r) => `<div class="faculty-row faculty-assignment">
             <span><b>${esc(r.full_name || r.email)}</b><small>${esc(r.email)}</small></span>
-            <span class="class-checks">${classNames.map((c) => `<label><input type="checkbox" data-class-for="${r.user_id}" value="${c}" ${r.classes.includes(c)?'checked':''}>${c}</label>`).join('')}<button class="btn tiny" data-save-classes="${r.user_id}">배정 저장</button></span>
+            <span class="class-checks">${CLASS_NAMES.map((c) => `<label><input type="checkbox" data-class-for="${r.user_id}" value="${c}" ${r.classes.includes(c) ? 'checked' : ''}>${c}</label>`).join('')}<button class="btn tiny" data-save-classes="${r.user_id}">배정 저장</button></span>
           </div>`).join('') : '<p class="muted">승인된 교수자가 없습니다.</p>'}
-        </div>` : ''}
-        <div class="export-bar">
-          <span class="muted">데이터 내보내기:</span>
-          <a class="btn tiny" id="exXlsx">📊 Excel(.xlsx)</a>
-          <a class="btn tiny" id="exCsv">📄 CSV</a>
-          <a class="btn tiny" id="exDoc">📝 Word(.doc)</a>
-          <a class="btn tiny" id="exPdf" target="_blank">🖨️ PDF(인쇄)</a>
-          <span class="muted export-note">한글(Hancom)은 xlsx·doc·csv를 그대로 열 수 있습니다.</span>
-        </div>
-        <div class="grade-intro">
-          <h3>학생 작성 내용 확인 · 채점</h3>
-          <p class="muted">각 조의 <b>작성 내용 보기</b>를 누르면 그 조가 기록한 오류 탐지 내용, 우선순위, SBAR, 개인 성찰을 모두 확인하고
-            그 자리에서 점수를 입력할 수 있습니다. 탐지40·고위험15는 자동 채점이고, 우선15·SBAR15·팀10·성찰5는 교수자가 직접 입력합니다.
-            ${API.isAdmin() ? '총괄관리자는 모든 분반을 볼 수 있습니다.' : '담당하신 분반의 조만 표시됩니다.'}</p>
-        </div>
-        <div class="prof-filter">
-          <label>사례
-            <select id="pf-case">
-              <option value="">전체</option>
-              ${['A','B','C','D'].map((x) => `<option value="${x}" ${preCase===x?'selected':''}>CASE ${x}</option>`).join('')}
-            </select>
-          </label>
-          <label>분반
-            <select id="pf-class">
-              <option value="">전체</option>
-              ${classNames.map((x) => `<option value="${x}" ${preClass===x?'selected':''}>${x}</option>`).join('')}
-            </select>
-          </label>
-          <span class="muted">${rows.length}개 조 세션</span>
-        </div>
-        <table class="prof-table">
-          <thead><tr>
-            <th>사례</th><th>반</th><th>조</th><th>탐지</th><th>고위험</th>
-            <th>탐지40</th><th>고위험15</th><th>우선15</th><th>SBAR15</th><th>팀10</th><th>성찰5</th>
-            <th>총점</th><th>채점 관리</th>
-          </tr></thead>
-          <tbody id="pf-body">
-            ${rows.map(rowHtml).join('') || '<tr><td colspan="13" class="muted">세션이 없습니다.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-      <div id="profModal" class="modal-back"></div>`;
-    app.querySelector('#pf-case').addEventListener('change', (e) => viewProfessor(e.target.value, app.querySelector('#pf-class').value));
-    app.querySelector('#pf-class').addEventListener('change', (e) => viewProfessor(app.querySelector('#pf-case').value, e.target.value));
+        </div>`;
+    }
+
+    /* ---------- 채점 표 ---------- */
+    const dirty = new Set();
+    const visibleRows = () => {
+      const q = PF.q.trim().toLowerCase();
+      return allRows.filter((r) => (PF.status === 'all' || r.status === PF.status)
+        && (!q || [r.studentName, r.studentNumber, r.teamName, ...(r.members || [])].some((v) => String(v || '').toLowerCase().includes(q))));
+    };
+
+    function rowHtml(r) {
+      const b = r.breakdown || {};
+      const man = (k, max) => `<input class="mini-in" data-sid="${r.id}" data-k="${k}" type="number" min="0" max="${max}" step="0.5" value="${b[k] ?? 0}"/>`;
+      return `<tr data-sid="${r.id}" class="st-row-${r.status}${r.hasContent ? '' : ' row-empty'}">
+        <td>${esc(r.className)}</td>
+        <td>${esc(r.studentNumber || '-')}</td>
+        <td><b>${esc(r.studentName || '-')}</b>${r.attempts > 1 ? ` <small class="muted" title="같은 사례에 만든 기록 수">시도 ${r.attempts}</small>` : ''}</td>
+        <td>CASE ${esc(r.caseId)}</td><td>${esc(r.teamName || '-')}</td>
+        <td><span class="status-pill ${r.status}">${STATUS_LABEL[r.status] || esc(r.status)}</span>${r.hasContent ? '' : '<small class="muted"> (빈 기록)</small>'}</td>
+        <td>${r.detectedCount}</td><td>${r.highRiskHit}/5</td>
+        <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
+        ${MANUAL_KEYS.map(([k, max]) => `<td>${man(k, max)}</td>`).join('')}
+        <td class="total"><b>${r.total ?? '-'}</b></td>
+        <td class="row-actions"><button class="btn tiny view-btn" data-detail="${r.id}">📄 작성 내용 보기</button>${API.isAdmin() ? ` <button class="btn tiny ghost danger" data-reset-score="${r.id}" title="학생 기록과 점수를 처음 상태로">초기화</button>` : ''}</td>
+      </tr>`;
+    }
+
+    function renderTable() {
+      const body = app.querySelector('#pf-body');
+      if (!body) return;
+      const rows = visibleRows();
+      body.innerHTML = rows.map(rowHtml).join('')
+        || `<tr><td colspan="16" class="muted">${allRows.length ? '조건에 맞는 기록이 없습니다.' : '아직 학생 기록이 없습니다.'}</td></tr>`;
+      dirty.forEach((sid) => body.querySelector(`tr[data-sid="${sid}"]`)?.classList.add('row-dirty'));
+      bindProfRows();
+    }
+
+    function updateDirtyUI() {
+      const btn = app.querySelector('#bulkSave');
+      if (!btn) return;
+      btn.disabled = dirty.size === 0;
+      app.querySelector('#dirtyCount').textContent = dirty.size;
+    }
+
+    function applySaved(sid, res) {
+      const row = allRows.find((r) => r.id === sid);
+      if (!row || !res?.score) return;
+      row.breakdown = res.score.breakdown;
+      row.total = res.score.total;
+      if (res.session?.status) row.status = res.session.status;
+    }
+
+    async function saveRow(sid) {
+      const manualScores = {};
+      app.querySelectorAll(`.mini-in[data-sid="${sid}"]`).forEach((inp) => { manualScores[inp.dataset.k] = Number(inp.value) || 0; });
+      const res = await API.saveManual(sid, manualScores);
+      applySaved(sid, res);
+      dirty.delete(sid);
+      return res;
+    }
+
+    function bindProfRows() {
+      app.querySelectorAll('[data-detail]').forEach((btn) => btn.addEventListener('click', () =>
+        openSessionDetail(btn.dataset.detail, visibleRows().map((r) => r.id), (sid, res) => { applySaved(sid, res); dirty.delete(sid); renderTable(); updateDirtyUI(); })));
+      app.querySelectorAll('.mini-in[data-sid]').forEach((inp) => {
+        inp.addEventListener('input', () => {
+          dirty.add(inp.dataset.sid);
+          inp.closest('tr')?.classList.add('row-dirty');
+          updateDirtyUI();
+        });
+        inp.addEventListener('blur', () => {
+          const max = Number(inp.max); const v = Number(inp.value);
+          if (inp.value !== '' && (v < 0 || v > max)) { inp.value = Math.max(0, Math.min(v, max)); toast(`이 항목은 0~${max}점입니다.`, 'warn'); }
+        });
+      });
+      app.querySelectorAll('[data-reset-score]').forEach((btn) => btn.addEventListener('click', async () => {
+        if (!window.confirm('이 실습 기록을 처음 상태로 초기화할까요?\n\n초기화 대상: 오류 탐지, 고위험 판정, 우선순위, SBAR, 성찰, 자동·수동 점수\n유지: 학생 계정, 분반, 조 정보')) return;
+        try { await API.resetManual(btn.dataset.resetScore); toast('오류 탐지와 자동·수동 성적을 모두 초기화했습니다.', 'ok'); viewProfessor(); }
+        catch (e) { toast(e.message || '전체 실습 초기화 실패', 'warn'); }
+      }));
+    }
+
+    /* ---------- 공통 바인딩 ---------- */
+    app.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => {
+      if (dirty.size && !window.confirm(`저장하지 않은 점수 ${dirty.size}건이 있습니다. 탭을 옮겨도 입력값은 유지되지만 저장되지는 않습니다. 계속할까요?`)) return;
+      PF.tab = btn.dataset.tab; savePF();
+      app.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b === btn));
+      app.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== PF.tab; });
+    }));
     app.querySelector('#adminCases').addEventListener('click', viewHome);
     app.querySelector('#admOut').addEventListener('click', () => { API.logout(); refreshAdminNav(); viewLogin('student'); });
-    // 내보내기 링크(다운로드는 헤더를 못 실으므로 code를 쿼리로 전달)
-    [['exXlsx','xlsx'],['exCsv','csv'],['exDoc','doc'],['exPdf','html']].forEach(([id, fmt]) => {
-      const el = app.querySelector('#' + id); el.removeAttribute('href');
-      el.addEventListener('click', () => API.downloadExport(fmt, q).catch((e) => toast(e.message, 'warn')));
+
+    const leaveGuard = () => !dirty.size || window.confirm(`저장하지 않은 점수 ${dirty.size}건이 사라집니다. 계속할까요?`);
+    app.querySelector('#pf-case').addEventListener('change', (e) => { if (!leaveGuard()) { e.target.value = PF.caseId; return; } PF.caseId = e.target.value; viewProfessor(); });
+    app.querySelector('#pf-class').addEventListener('change', (e) => { if (!leaveGuard()) { e.target.value = PF.className; return; } PF.className = e.target.value; viewProfessor(); });
+    app.querySelector('#pf-all').addEventListener('change', (e) => { if (!leaveGuard()) { e.target.checked = !e.target.checked; return; } PF.view = e.target.checked ? 'all' : 'latest'; viewProfessor(); });
+    app.querySelector('#pf-q').addEventListener('input', (e) => { PF.q = e.target.value; savePF(); renderTable(); });
+    app.querySelectorAll('[data-status]').forEach((btn) => btn.addEventListener('click', () => {
+      PF.status = btn.dataset.status; savePF();
+      app.querySelectorAll('[data-status]').forEach((b) => b.classList.toggle('on', b === btn));
+      renderTable();
+    }));
+    app.querySelectorAll('[data-export]').forEach((el) => el.addEventListener('click', () => {
+      const q = { view: PF.view, ...(PF.caseId ? { caseId: PF.caseId } : {}), ...(PF.className ? { className: PF.className } : {}),
+        ...(PF.status !== 'all' ? { status: PF.status } : {}), ...(PF.q.trim() ? { q: PF.q.trim() } : {}) };
+      API.downloadExport(el.dataset.export, q).catch((e) => toast(e.message, 'warn'));
+    }));
+    app.querySelector('#bulkSave').addEventListener('click', async () => {
+      const ids = [...dirty];
+      const btn = app.querySelector('#bulkSave'); btn.disabled = true;
+      let ok = 0; const failed = [];
+      for (const sid of ids) {
+        try { await saveRow(sid); ok++; } catch (e) { failed.push(sid); }
+      }
+      renderTable(); updateDirtyUI();
+      toast(failed.length ? `${ok}건 저장, ${failed.length}건 실패 — 다시 시도하세요.` : `${ok}건 채점 저장됨 ✓`, failed.length ? 'warn' : 'ok');
     });
-    bindProfRows();
+
+    app.querySelector('#st-class')?.addEventListener('change', (e) => { PF.sClass = e.target.value; savePF(); renderStudents(); });
+    app.querySelector('#st-q')?.addEventListener('input', (e) => { PF.sq = e.target.value; savePF(); renderStudents(); });
+    app.querySelector('#onlyNeedsCheck')?.addEventListener('change', (e) => { PF.needsOnly = e.target.checked; savePF(); renderStudents(); });
+
+    app.querySelectorAll('[data-release-number]').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!window.confirm(`${btn.dataset.owner || '기존 등록자'} 계정에서 학번 ${btn.dataset.number}을(를) 해제할까요?\n해당 학생은 다음 접속 때 학번을 다시 입력해야 합니다. 기존 실습 기록은 유지됩니다.`)) return;
+      try { await API.releaseStudentNumber(btn.dataset.releaseNumber); toast('기존 학번을 해제했습니다. 신청 학생에게 학생 정보를 다시 저장하라고 안내하세요.', 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '학번 해제 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-resolve-conflict]').forEach((btn) => btn.addEventListener('click', async () => {
+      try { await API.resolveStudentNumberConflict(btn.dataset.resolveConflict); toast('확인 완료로 처리했습니다.', 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
     app.querySelectorAll('[data-faculty]').forEach((btn) => btn.addEventListener('click', async () => {
       if (btn.dataset.revokeFaculty && !window.confirm('이 교수자의 권한과 분반 배정을 회수할까요?\n배정된 학생은 새 지도교수를 선택한 후 다시 승인받아야 합니다.')) return;
       try {
         await API.reviewFaculty(btn.dataset.faculty, btn.dataset.decision);
         toast(btn.dataset.decision === 'approved' ? '교수자 권한을 승인했습니다.' : (btn.dataset.revokeFaculty ? '교수자 권한과 분반 배정을 회수했습니다.' : '신청을 거절했습니다.'), 'ok');
         viewProfessor();
-      }
-      catch (e) { toast(e.message || '처리 실패', 'warn'); }
+      } catch (e) { toast(e.message || '처리 실패', 'warn'); }
     }));
     app.querySelectorAll('[data-save-classes]').forEach((btn) => btn.addEventListener('click', async () => {
       const selected = [...app.querySelectorAll(`[data-class-for="${btn.dataset.saveClasses}"]:checked`)].map((x) => x.value);
       if (selected.length > 2) return toast('교수자당 최대 2개 분반만 배정할 수 있습니다.', 'warn');
-      try { await API.assignFacultyClasses(btn.dataset.saveClasses, selected); toast('담당 분반을 저장했습니다.', 'ok'); viewProfessor(preCase, preClass); }
+      try { await API.assignFacultyClasses(btn.dataset.saveClasses, selected); toast('담당 분반을 저장했습니다.', 'ok'); viewProfessor(); }
       catch (e) { toast(e.message || '분반 배정 실패', 'warn'); }
     }));
-    app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
-      try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
-      catch (e) { toast(e.message || '처리 실패', 'warn'); }
-    }));
-    app.querySelector('#onlyNeedsCheck')?.addEventListener('change', (e) => {
-      app.querySelectorAll('[data-student-row]').forEach((row) => {
-        const r = studentApprovals.find((x) => x.user_id === row.dataset.studentRow);
-        const needs = !r || !(r.student_number && r.grade && r.class_name && r.faculty_user_id) || String(r.student_number || '').startsWith('임시') || r.approval_status !== 'approved';
-        row.style.display = e.target.checked && !needs ? 'none' : '';
-      });
-    });
-    app.querySelectorAll('[data-edit-student]').forEach((btn) => btn.addEventListener('click', () => {
-      const r = studentApprovals.find((x) => x.user_id === btn.dataset.editStudent);
-      const row = app.querySelector(`[data-student-row="${btn.dataset.editStudent}"]`);
-      if (!r || !row) return;
-      row.innerHTML = `<div class="student-edit">
-        <label>이름<input data-f="fullName" value="${esc(r.full_name || '')}"></label>
-        <label>학번<input data-f="studentNumber" inputmode="numeric" placeholder="모르면 비워두기" value="${esc(r.student_number || '')}"></label>
-        <label>학년<select data-f="grade">${[1,2,3,4].map((g) => `<option value="${g}" ${Number(r.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
-        <label>분반<select data-f="className">${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c} · ${esc(facultyRoutes.find((f) => f.classes.includes(c))?.full_name || '교수 미배정')}</option>`).join('')}</select></label>
-        <span><button class="btn tiny" data-save-edit>저장·승인</button><button class="btn tiny ghost" data-cancel-edit>취소</button></span>
-        <small class="muted">저장하면 해당 분반 지도교수가 배정되고 바로 사용 승인됩니다. 학번이 다른 계정과 겹치면 그 계정을 알려 드립니다.</small>
-      </div>`;
-      const val = (f) => row.querySelector(`[data-f="${f}"]`).value.trim();
-      row.querySelector('[data-cancel-edit]').addEventListener('click', () => viewProfessor(preCase, preClass));
-      row.querySelector('[data-save-edit]').addEventListener('click', async () => {
-        try {
-          await API.adminUpdateStudent(r.user_id, { fullName: val('fullName'), studentNumber: val('studentNumber'), grade: val('grade'), className: val('className') });
-          toast(`${val('fullName')} 학생 정보를 저장하고 승인했습니다.`, 'ok'); viewProfessor(preCase, preClass);
-        } catch (e) { toast(e.message || '학생 정보 수정 실패', 'warn'); }
-      });
-    }));
-    app.querySelectorAll('[data-release-number]').forEach((btn) => btn.addEventListener('click', async () => {
-      if (!window.confirm(`${btn.dataset.owner || '기존 등록자'} 계정에서 학번 ${btn.dataset.number}을(를) 해제할까요?\n해당 학생은 다음 접속 때 학번을 다시 입력해야 합니다. 기존 실습 기록은 유지됩니다.`)) return;
-      try { await API.releaseStudentNumber(btn.dataset.releaseNumber); toast('기존 학번을 해제했습니다. 신청 학생에게 학생 정보를 다시 저장하라고 안내하세요.', 'ok'); viewProfessor(preCase, preClass); }
-      catch (e) { toast(e.message || '학번 해제 실패', 'warn'); }
-    }));
-    app.querySelectorAll('[data-resolve-conflict]').forEach((btn) => btn.addEventListener('click', async () => {
-      try { await API.resolveStudentNumberConflict(btn.dataset.resolveConflict); toast('확인 완료로 처리했습니다.', 'ok'); viewProfessor(preCase, preClass); }
-      catch (e) { toast(e.message || '처리 실패', 'warn'); }
-    }));
-    app.querySelectorAll('[data-move-student]').forEach((btn) => btn.addEventListener('click', async () => {
-      const className = app.querySelector(`[data-student-class="${btn.dataset.moveStudent}"]`).value;
-      if (!className) return toast('옮길 분반을 선택하세요.', 'warn');
-      try { await API.manageStudentRoute(btn.dataset.moveStudent, className); toast('학생 분반과 지도교수를 변경했습니다.', 'ok'); viewProfessor(preCase, preClass); }
-      catch (e) { toast(e.message || '분반 변경 실패', 'warn'); }
-    }));
-    app.querySelectorAll('[data-unassign-student]').forEach((btn) => btn.addEventListener('click', async () => {
-      if (!window.confirm('이 학생의 분반과 지도교수 배정을 해제할까요? 기존 실습 기록은 유지됩니다.')) return;
-      try { await API.manageStudentRoute(btn.dataset.unassignStudent, ''); toast('학생의 분반 배정을 해제했습니다.', 'ok'); viewProfessor(preCase, preClass); }
-      catch (e) { toast(e.message || '분반 해제 실패', 'warn'); }
-    }));
 
-    function rowHtml(r) {
-      const b = r.breakdown || {};
-      const man = (k, max) => `<input class="mini-in" data-sid="${r.id}" data-k="${k}" type="number" min="0" max="${max}" value="${b[k] ?? 0}"/>`;
-      return `<tr data-sid="${r.id}">
-        <td><b>CASE ${r.caseId}</b></td><td>${esc(r.className)}</td><td>${esc(r.teamName)}</td>
-        <td>${r.detectedCount}</td><td>${r.highRiskHit}/5</td>
-        <td class="ro">${b.detection ?? 0}</td><td class="ro">${b.highRisk ?? 0}</td>
-        <td>${man('priority',15)}</td><td>${man('sbar',15)}</td><td>${man('teamwork',10)}</td><td>${man('reflection',5)}</td>
-        <td class="total"><b>${r.total ?? '-'}</b></td>
-        <td><button class="btn tiny view-btn" data-detail="${r.id}">📄 작성 내용 보기</button> <button class="btn tiny ghost" data-save="${r.id}">점수만 저장</button>${API.isAdmin() ? `<button class="btn tiny ghost danger" data-reset-score="${r.id}">초기화</button>` : ''}</td>
-      </tr>`;
-    }
-    function bindProfRows() {
-      app.querySelectorAll('[data-detail]').forEach((btn) => {
-        btn.addEventListener('click', () => openSessionDetail(btn.dataset.detail));
-      });
-      app.querySelectorAll('[data-save]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const sid = btn.dataset.save;
-          const manualScores = {};
-          app.querySelectorAll(`.mini-in[data-sid="${sid}"]`).forEach((inp) => {
-            manualScores[inp.dataset.k] = Number(inp.value) || 0;
-          });
-          const res = await API.saveManual(sid, manualScores);
-          const tr = app.querySelector(`tr[data-sid="${sid}"] .total b`);
-          if (tr) tr.textContent = res.score.total;
-          toast('채점 저장됨 ✓', 'ok');
-        });
-      });
-      app.querySelectorAll('[data-reset-score]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          if (!window.confirm('이 실습 기록을 처음 상태로 초기화할까요?\n\n초기화 대상: 오류 탐지, 고위험 판정, 우선순위, SBAR, 성찰, 자동·수동 점수\n유지: 학생 계정, 분반, 조 정보')) return;
+    function bindStudentRows() {
+      const box = app.querySelector('#studentList');
+      box.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
+        if (btn.dataset.decision === 'rejected' && !window.confirm('이 학생의 사용 신청을 거절할까요? 거절된 학생은 사례에 입장할 수 없습니다.')) return;
+        try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
+        catch (e) { toast(e.message || '처리 실패', 'warn'); }
+      }));
+      box.querySelectorAll('[data-move-student]').forEach((btn) => btn.addEventListener('click', async () => {
+        const className = box.querySelector(`[data-student-class="${btn.dataset.moveStudent}"]`).value;
+        if (!className) return toast('옮길 분반을 선택하세요.', 'warn');
+        try { await API.manageStudentRoute(btn.dataset.moveStudent, className); toast('학생 분반과 지도교수를 변경했습니다.', 'ok'); viewProfessor(); }
+        catch (e) { toast(e.message || '분반 변경 실패', 'warn'); }
+      }));
+      box.querySelectorAll('[data-unassign-student]').forEach((btn) => btn.addEventListener('click', async () => {
+        if (!window.confirm('이 학생의 분반과 지도교수 배정을 해제할까요? 기존 실습 기록은 유지됩니다.')) return;
+        try { await API.manageStudentRoute(btn.dataset.unassignStudent, ''); toast('학생의 분반 배정을 해제했습니다.', 'ok'); viewProfessor(); }
+        catch (e) { toast(e.message || '분반 해제 실패', 'warn'); }
+      }));
+      box.querySelectorAll('[data-edit-student]').forEach((btn) => btn.addEventListener('click', () => {
+        const r = students.find((x) => x.user_id === btn.dataset.editStudent);
+        const row = box.querySelector(`[data-student-row="${btn.dataset.editStudent}"]`);
+        if (!r || !row) return;
+        row.innerHTML = `<div class="student-edit">
+          <label>이름<input data-f="fullName" value="${esc(r.full_name || '')}"></label>
+          <label>학번<input data-f="studentNumber" inputmode="numeric" placeholder="모르면 비워두기" value="${esc(r.student_number || '')}"></label>
+          <label>학년<select data-f="grade">${[1, 2, 3, 4].map((g) => `<option value="${g}" ${Number(r.grade) === g ? 'selected' : ''}>${g}학년</option>`).join('')}</select></label>
+          <label>분반<select data-f="className">${CLASS_NAMES.map((c) => `<option value="${c}" ${r.class_name === c ? 'selected' : ''}>${c} · ${esc(facultyRoutes.find((f) => f.classes.includes(c))?.full_name || '교수 미배정')}</option>`).join('')}</select></label>
+          <span><button class="btn tiny" data-save-edit>저장·승인</button><button class="btn tiny ghost" data-cancel-edit>취소</button></span>
+          <small class="muted">저장하면 해당 분반 지도교수가 배정되고 바로 사용 승인됩니다. 학번이 다른 계정과 겹치면 그 계정을 알려 드립니다.</small>
+        </div>`;
+        const val = (f) => row.querySelector(`[data-f="${f}"]`).value.trim();
+        row.querySelector('[data-cancel-edit]').addEventListener('click', renderStudents);
+        row.querySelector('[data-save-edit]').addEventListener('click', async () => {
           try {
-            await API.resetManual(btn.dataset.resetScore);
-            toast('오류 탐지와 자동·수동 성적을 모두 초기화했습니다.', 'ok');
-            viewProfessor(preCase, preClass);
-          } catch (e) { toast(e.message || '전체 실습 초기화 실패', 'warn'); }
+            await API.adminUpdateStudent(r.user_id, { fullName: val('fullName'), studentNumber: val('studentNumber'), grade: val('grade'), className: val('className') });
+            toast(`${val('fullName')} 학생 정보를 저장하고 승인했습니다.`, 'ok'); viewProfessor();
+          } catch (e) { toast(e.message || '학생 정보 수정 실패', 'warn'); }
         });
-      });
+      }));
     }
+
+    renderTable();
+    renderStudents();
   }
 
-  /* ================= 모달: 학생 작성 내용 보기(교수자 채점 근거) ================= */
-  async function openSessionDetail(sid) {
+  /* ================= 모달: 학생 작성 내용 보기(교수자 채점) =================
+   * order: 현재 표에 보이는 기록 id 순서 — 이전/다음, 저장 후 다음으로 이동하며 연속 채점 */
+  async function openSessionDetail(sid, order = [], onSaved = () => {}) {
     const modal = document.getElementById('profModal');
     if (!modal) return;
-    const close = () => modal.classList.remove('open');
+    let dirty = false;
+    const close = () => {
+      if (dirty && !window.confirm('저장하지 않은 점수가 있습니다. 닫을까요?')) return;
+      modal.classList.remove('open'); document.removeEventListener('keydown', onKey);
+    };
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.removeEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey);
     modal.innerHTML = `<div class="modal detail"><p class="muted">불러오는 중…</p></div>`;
     modal.classList.add('open');
     modal.onclick = (e) => { if (e.target === modal) close(); };
+    const idx = order.indexOf(sid);
+    const prevId = idx > 0 ? order[idx - 1] : null;
+    const nextId = idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null;
+    const go = (id) => { document.removeEventListener('keydown', onKey); openSessionDetail(id, order, onSaved); };
     try {
-      const { session, score, caseTitle, findings, priorities } = await API.sessionDetail(sid);
+      const { session, score, caseTitle, findings, priorities, answerKey = [], priorityHighRiskHits = 0, student = {} } = await API.sessionDetail(sid);
       const sb = session.sbar || {};
       const rf = session.reflection || {};
       const notWritten = '<span class="muted">미작성</span>';
+      const missed = answerKey.filter((e) => !e.found);
       modal.innerHTML = `
         <div class="modal detail">
-          <button class="modal-x" id="mx">✕</button>
+          <button class="modal-x" id="mx" title="닫기(Esc)">✕</button>
+          <div class="detail-nav">
+            <button class="btn tiny ghost" id="dPrev" ${prevId ? '' : 'disabled'}>◀ 이전</button>
+            <span class="muted">${idx >= 0 ? `${idx + 1} / ${order.length}` : ''}</span>
+            <button class="btn tiny ghost" id="dNext" ${nextId ? '' : 'disabled'}>다음 ▶</button>
+          </div>
           <div class="case-tag big">CASE ${esc(session.caseId)}</div>
-          <h3>${esc(caseTitle)}</h3>
-          <p class="muted">${esc(session.className)} · ${esc(session.teamName)}${session.members?.length ? ' · ' + esc(session.members.join(', ')) : ''}</p>
+          <h3>${esc(student.name || (session.members || [])[0] || '학생')} <small class="muted">${esc(student.number || '')}</small></h3>
+          <p class="muted">${esc(caseTitle)} · ${esc(session.className)} · ${esc(session.teamName || '조 미입력')}${session.members?.length ? ' · 조원 ' + esc(session.members.join(', ')) : ''}
+            · <span class="status-pill ${session.status}">${STATUS_LABEL[session.status] || esc(session.status)}</span>
+            ${session.submittedAt ? ` · 제출 ${esc(fmtTime(session.submittedAt))}` : ''}</p>
+          ${session.status === 'exploring' ? '<p class="preview-note">아직 제출하지 않은 기록입니다. 학생이 작성 중일 수 있습니다.</p>' : ''}
 
-          <h4>오류 탐지 기록 <span class="muted">${findings.length}건</span></h4>
+          <h4>오류 탐지 기록 <span class="muted">${findings.length}건 · 정답 ${answerKey.length - missed.length}/${answerKey.length} 찾음</span></h4>
           ${findings.length ? `<table class="find-table">
             <thead><tr><th>#</th><th>위치/단서</th><th>왜 위험</th><th>조치</th><th>고위험</th></tr></thead>
             <tbody>${findings.map((f, i) => `<tr>
@@ -1212,8 +1405,13 @@
               <td>${esc(f.why)}</td><td>${esc(f.action)}</td>
               <td>${f.isHighRiskGuess ? '⚠️' : ''}</td></tr>`).join('')}</tbody>
           </table>` : '<p class="muted">기록된 오류가 없습니다.</p>'}
+          ${answerKey.length ? `<details class="answer-key" ${missed.length ? 'open' : ''}><summary>정답 대비 결과 — 놓친 오류 ${missed.length}개</summary>
+            <table class="find-table"><thead><tr><th>코드</th><th>영역</th><th>정답 단서</th><th>결과</th></tr></thead><tbody>
+            ${answerKey.map((e) => `<tr class="${e.found ? 'row-found' : 'row-miss'}"><td>${esc(e.code)}${e.highRisk ? ' ★' : ''}</td><td>${esc(e.area)}</td><td>${esc(e.clue)}</td>
+              <td>${e.found ? (e.documented ? '✓ 찾음' : '△ 찾음(기록 미흡·절반)') : '— 놓침'}</td></tr>`).join('')}
+            </tbody></table><p class="muted small-note">★ 고위험 오류</p></details>` : ''}
 
-          <h4>상위 5개 우선순위 <span class="muted">선택 순서</span></h4>
+          <h4>상위 5개 우선순위 <span class="muted">선택 순서 · 고위험 관련 ${priorityHighRiskHits}/${Math.min(5, priorities.length) || 5}</span></h4>
           ${priorities.length ? `<ol class="prio-review">${priorities.map((p) => `<li>${esc(p.label)}</li>`).join('')}</ol>` : '<p class="muted">우선순위를 선택하지 않았습니다.</p>'}
 
           <h4>SBAR 보고</h4>
@@ -1230,39 +1428,59 @@
           <div class="detail-score">
             ${score.rubric.map((rb) => `
               <div class="detail-score-row">
-                <span>${esc(rb.label)} <small class="muted">(${rb.max}점${rb.auto ? ' · 자동' : ''})</small></span>
+                <span>${esc(rb.label)} <small class="muted">(${rb.max}점${rb.auto ? ' · 자동' : ''})</small>${rb.desc ? `<small class="rubric-desc">${esc(rb.desc)}</small>` : ''}</span>
                 ${rb.auto
                   ? `<b>${score.breakdown[rb.key]}</b>`
-                  : `<input class="mini-in" data-dk="${rb.key}" type="number" min="0" max="${rb.max}" value="${score.breakdown[rb.key] ?? 0}"/>`}
+                  : `<span class="score-input"><input class="mini-in" data-dk="${rb.key}" type="number" min="0" max="${rb.max}" step="0.5" value="${score.breakdown[rb.key] ?? 0}"/>
+                      <button class="btn tiny ghost" data-full="${rb.key}" data-max="${rb.max}" title="만점 입력">만점</button></span>`}
               </div>`).join('')}
-            <p class="detail-total">총점 <b>${score.total}</b> / 100</p>
+            <p class="detail-total">총점 <b id="dTotal">${score.total}</b> / 100</p>
           </div>
           <div class="modal-actions">
             <button class="btn ghost" id="close2">닫기</button>
-            <button class="btn primary" id="saveDetail">채점 저장</button>
+            <button class="btn" id="saveDetail">채점 저장</button>
+            ${nextId ? '<button class="btn primary" id="saveNext">저장 후 다음 ▶</button>' : ''}
           </div>
         </div>`;
+      const autoSum = score.rubric.filter((r) => r.auto).reduce((s, r) => s + Number(score.breakdown[r.key] || 0), 0);
+      const recalc = () => {
+        let t = autoSum;
+        modal.querySelectorAll('[data-dk]').forEach((inp) => { t += Math.max(0, Math.min(Number(inp.value) || 0, Number(inp.max))); });
+        modal.querySelector('#dTotal').textContent = Math.round(t * 10) / 10;
+      };
+      modal.querySelectorAll('[data-dk]').forEach((inp) => inp.addEventListener('input', () => { dirty = true; recalc(); }));
+      modal.querySelectorAll('[data-full]').forEach((b) => b.addEventListener('click', () => {
+        modal.querySelector(`[data-dk="${b.dataset.full}"]`).value = b.dataset.max; dirty = true; recalc();
+      }));
       modal.querySelector('#mx').addEventListener('click', close);
       modal.querySelector('#close2').addEventListener('click', close);
-      modal.querySelector('#saveDetail').addEventListener('click', async () => {
+      modal.querySelector('#dPrev').addEventListener('click', () => { if (!dirty || window.confirm('저장하지 않은 점수가 있습니다. 이동할까요?')) go(prevId); });
+      modal.querySelector('#dNext').addEventListener('click', () => { if (!dirty || window.confirm('저장하지 않은 점수가 있습니다. 이동할까요?')) go(nextId); });
+      const save = async () => {
         const manualScores = {};
-        modal.querySelectorAll('[data-dk]').forEach((inp) => { manualScores[inp.dataset.dk] = Number(inp.value) || 0; });
-        try {
-          const res = await API.saveManual(sid, manualScores);
-          // 목록 화면(교수 대시보드 표)의 값도 함께 갱신
-          Object.entries(manualScores).forEach(([k, v]) => {
-            const tin = document.querySelector(`.mini-in[data-sid="${sid}"][data-k="${k}"]`);
-            if (tin) tin.value = v;
-          });
-          const totalCell = document.querySelector(`tr[data-sid="${sid}"] .total b`);
-          if (totalCell) totalCell.textContent = res.score.total;
-          toast('채점 저장됨 ✓', 'ok');
-          close();
-        } catch (e) { toast(e.message || '채점 저장 실패', 'warn'); }
+        for (const inp of modal.querySelectorAll('[data-dk]')) {
+          const v = Number(inp.value);
+          if (inp.value === '' || Number.isNaN(v) || v < 0 || v > Number(inp.max)) { toast(`점수는 0~${inp.max}점 사이로 입력하세요.`, 'warn'); inp.focus(); return null; }
+          manualScores[inp.dataset.dk] = v;
+        }
+        const res = await API.saveManual(sid, manualScores);
+        dirty = false;
+        onSaved(sid, res);
+        toast(`${student.name || '학생'} 채점 저장됨 ✓ (${res.score.total}점)`, 'ok');
+        return res;
+      };
+      modal.querySelector('#saveDetail').addEventListener('click', async () => {
+        try { if (await save()) { modal.classList.remove('open'); document.removeEventListener('keydown', onKey); } }
+        catch (e) { toast(e.message || '채점 저장 실패', 'warn'); }
       });
+      modal.querySelector('#saveNext')?.addEventListener('click', async () => {
+        try { if (await save()) go(nextId); }
+        catch (e) { toast(e.message || '채점 저장 실패', 'warn'); }
+      });
+      modal.querySelector('.modal.detail')?.scrollTo?.(0, 0);
     } catch (e) {
       modal.innerHTML = `<div class="modal detail"><button class="modal-x" id="mx">✕</button><p class="muted">불러오지 못했습니다: ${esc(e.message)}</p></div>`;
-      modal.querySelector('#mx').addEventListener('click', close);
+      modal.querySelector('#mx').addEventListener('click', () => { modal.classList.remove('open'); document.removeEventListener('keydown', onKey); });
     }
   }
 

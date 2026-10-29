@@ -74,23 +74,71 @@ function requireApproved(req, res, next) {
 }
 
 /* 채점 행 생성(교수 대시보드·내보내기 공용)
- * 교수자 미리보기 세션은 학생 성적이 아니므로 채점 목록에서 제외한다. */
-async function buildScoreRows(token, filter = {}) {
-  const sessions = await db.listSessions(token, filter);
-  return sessions
-    .filter((s) => s.className !== db.PREVIEW_CLASS)
-    .map((s) => {
-      const score = finalScore(s);
-      return {
-        id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName,
-        members: s.members, status: s.status, createdAt: s.createdAt,
-        total: score ? score.total : null,
-        detectedCount: score ? score.auto.detectedCount : 0,
-        highRiskHit: score ? score.auto.highRiskHit.length : 0,
-        breakdown: score ? score.breakdown : null,
-      };
-    });
+ * - 교수자 미리보기 세션은 학생 성적이 아니므로 제외한다.
+ * - 학생이 같은 사례에 여러 번 입장하면 세션이 여러 개 생기므로, 기본(view=latest)은
+ *   학생·사례별 대표 기록 1건만 보여 준다: 채점완료 > 제출 > 작성 중(기록 있음) > 빈 기록, 같으면 최신.
+ * - 학생 이름·학번은 프로필에서 붙인다(조원 칸은 학생이 자유 입력해 신뢰할 수 없음). */
+const STATUS_RANK = { scored: 3, reporting: 2, exploring: 1 };
+function hasContent(s) {
+  return (s.findings || []).some((f) => f.flagged) || (s.priorities || []).length > 0
+    || Object.values(s.sbar || {}).some((v) => String(v || '').trim());
 }
+function sessionRank(s) {
+  const st = STATUS_RANK[s.status] || 0;
+  return st === 1 && !hasContent(s) ? 0 : st;
+}
+
+async function buildScoreRows(token, filter = {}) {
+  const sessions = (await db.listSessions(token, { caseId: filter.caseId, className: filter.className }))
+    .filter((s) => s.className !== db.PREVIEW_CLASS);
+  const profiles = await db.listProfilesByIds(token, sessions.map((s) => s.studentUserId)).catch(() => []);
+  const byUser = Object.fromEntries(profiles.map((p) => [p.user_id, p]));
+
+  let picked = sessions;
+  const attempts = {};
+  if (filter.view !== 'all') {
+    const best = {};
+    for (const s of sessions) {
+      const k = `${s.studentUserId}|${s.caseId}`;
+      attempts[k] = (attempts[k] || 0) + 1;
+      const cur = best[k];
+      if (!cur || sessionRank(s) > sessionRank(cur)
+        || (sessionRank(s) === sessionRank(cur) && String(s.updatedAt || s.createdAt) > String(cur.updatedAt || cur.createdAt))) best[k] = s;
+    }
+    picked = Object.values(best);
+  }
+
+  let rows = picked.map((s) => {
+    const score = finalScore(s);
+    const p = byUser[s.studentUserId] || {};
+    return {
+      id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName,
+      members: s.members, status: s.status, createdAt: s.createdAt, updatedAt: s.updatedAt, submittedAt: s.submittedAt,
+      studentUserId: s.studentUserId, studentName: p.full_name || (s.members || [])[0] || '',
+      studentNumber: p.student_number || '',
+      attempts: attempts[`${s.studentUserId}|${s.caseId}`] || 1,
+      hasContent: hasContent(s),
+      total: score ? score.total : null,
+      detectedCount: score ? score.auto.detectedCount : 0,
+      highRiskHit: score ? score.auto.highRiskHit.length : 0,
+      breakdown: score ? score.breakdown : null,
+    };
+  });
+
+  if (filter.status === 'needs') rows = rows.filter((r) => r.status === 'reporting');
+  else if (filter.status && filter.status !== 'all') rows = rows.filter((r) => r.status === filter.status);
+  if (filter.q) {
+    const q = String(filter.q).trim().toLowerCase();
+    rows = rows.filter((r) => [r.studentName, r.studentNumber, r.teamName, ...(r.members || [])]
+      .some((v) => String(v || '').toLowerCase().includes(q)));
+  }
+  const cmp = (a, b) => String(a || '').localeCompare(String(b || ''), 'ko');
+  rows.sort((a, b) => cmp(a.className, b.className) || cmp(a.caseId, b.caseId)
+    || cmp(a.studentNumber || '~', b.studentNumber || '~') || cmp(a.studentName, b.studentName)
+    || cmp(b.createdAt, a.createdAt));
+  return rows;
+}
+const scoreFilter = (q) => ({ caseId: q.caseId, className: q.className, status: q.status, view: q.view, q: q.q });
 
 /* ================= 인증 API ================= */
 app.get('/api/auth/public-config', (req, res) => {
@@ -270,6 +318,19 @@ app.post('/api/sessions', requireAuth, requireApproved, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+/* 학생 본인의 기존 기록 — 같은 사례에 다시 들어올 때 새 기록 대신 이어서 하도록 */
+app.get('/api/sessions/mine', requireAuth, requireApproved, async (req, res) => {
+  try {
+    const caseId = req.query.caseId ? String(req.query.caseId).toUpperCase() : undefined;
+    const list = await db.listMySessions(req.auth.token, req.auth.user.id, caseId);
+    res.json(list.filter((s) => s.className !== db.PREVIEW_CLASS).map((s) => ({
+      id: s.id, caseId: s.caseId, className: s.className, teamName: s.teamName, status: s.status,
+      findings: (s.findings || []).filter((f) => f.flagged).length, hasContent: hasContent(s),
+      createdAt: s.createdAt, updatedAt: s.updatedAt,
+    })));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.get('/api/sessions/:id', requireAuth, requireApproved, async (req, res) => {
   const s = await db.getSession(req.auth.token, req.params.id);
   if (!s) return res.status(404).json({ error: 'session not found' });
@@ -363,8 +424,8 @@ app.post('/api/sessions/:id/manual/reset', requireAuth, requireAdmin, async (req
 
 /* ================= 교수(관리자) 대시보드 ================= */
 app.get('/api/professor/sessions', requireAuth, requireInstructor, async (req, res) => {
-  const { caseId, className } = req.query;
-  res.json(await buildScoreRows(req.auth.token, { caseId, className }));
+  try { res.json(await buildScoreRows(req.auth.token, scoreFilter(req.query))); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 /* 세션 상세 — 학생이 작성한 오류 탐지 기록·우선순위·SBAR·성찰을 그대로 노출(교수자 채점 근거) */
@@ -377,14 +438,29 @@ app.get('/api/professor/sessions/:id', requireAuth, requireInstructor, async (re
     .filter((f) => f.flagged)
     .map((f) => ({ ...f, label: labelOf(f.objectId) }));
   const priorities = (s.priorities || []).map((objectId, i) => ({ rank: i + 1, objectId, label: labelOf(objectId) }));
-  res.json({ session: s, score: finalScore(s), caseTitle: c ? c.title : s.caseId, findings, priorities });
+  const score = finalScore(s);
+  // 정답표 대비 찾은/놓친 오류 — 우선순위·성찰 채점 근거로 사용
+  const detected = new Map((score?.auto.detectionDetail || []).map((d) => [d.code, d]));
+  const answerKey = (c?.errors || []).map((e) => ({
+    code: e.code, area: e.area, clue: e.clue, point: e.point,
+    highRisk: c.highRisk.includes(e.code),
+    found: detected.has(e.code), documented: !!detected.get(e.code)?.documented,
+  }));
+  // 우선순위 상위 5개 중 고위험 오브젝트를 고른 개수(우선순위 점수 참고용)
+  const hrObjects = new Set((c?.objects || []).filter((o) => o.errors.some((code) => c.highRisk.includes(code))).map((o) => o.id));
+  const priorityHighRiskHits = (s.priorities || []).filter((id) => hrObjects.has(id)).length;
+  const [profile] = await db.listProfilesByIds(req.auth.token, [s.studentUserId]).catch(() => []);
+  res.json({
+    session: s, score, caseTitle: c ? c.title : s.caseId, findings, priorities, answerKey, priorityHighRiskHits,
+    student: { name: profile?.full_name || '', number: profile?.student_number || '', className: profile?.class_name || '' },
+  });
 });
 
 /* ================= 내보내기 (관리자 전용) ================= */
 app.get('/api/export/scores.:fmt', requireAuth, requireInstructor, async (req, res) => {
   const { caseId, className } = req.query;
-  const rows = await buildScoreRows(req.auth.token, { caseId, className });
-  const title = 'Room of Errors 채점표' + (caseId ? ` · CASE ${caseId}` : '');
+  const rows = await buildScoreRows(req.auth.token, scoreFilter(req.query));
+  const title = 'Room of Errors 채점표' + (caseId ? ` · CASE ${caseId}` : '') + (className ? ` · ${className}` : '');
   const stamp = new Date().toISOString().slice(0, 10);
   const fname = `RoomOfErrors_scores_${stamp}`;
   switch (req.params.fmt) {

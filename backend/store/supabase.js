@@ -30,6 +30,7 @@ function toSession(row) {
     reflection: row.reflection || {},
     manualScores: row.manual_scores || {},
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     submittedAt: row.submitted_at,
   };
 }
@@ -262,6 +263,27 @@ async function updateSession(token, id, patch) {
   return toSession(data);
 }
 
+async function listProfilesByIds(token, ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return [];
+  const out = [];
+  for (let i = 0; i < unique.length; i += 200) {
+    const { data, error } = await client(token).from('roe_profiles')
+      .select('user_id,full_name,student_number,grade,class_name').in('user_id', unique.slice(i, i + 200));
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
+async function listMySessions(token, userId, caseId) {
+  let q = client(token).from('roe_sessions').select('*').eq('student_user_id', userId).order('updated_at', { ascending: false });
+  if (caseId) q = q.eq('case_id', caseId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []).map(toSession);
+}
+
 async function listSessions(token, filter = {}) {
   let q = client(token).from('roe_sessions').select('*').order('created_at', { ascending: false });
   if (filter.caseId) q = q.eq('case_id', filter.caseId);
@@ -271,4 +293,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, reportStudentNumberConflict, listStudentNumberConflicts, resolveStudentNumberConflict, releaseStudentNumber, adminUpdateStudent, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, reportStudentNumberConflict, listStudentNumberConflicts, resolveStudentNumberConflict, releaseStudentNumber, adminUpdateStudent, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions, listProfilesByIds, listMySessions };
