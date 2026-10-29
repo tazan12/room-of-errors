@@ -592,6 +592,7 @@ textarea { resize: vertical; min-height: 60px; }
 .faculty-row:first-of-type { border-top: 0; }
 .faculty-row small { display: block; margin-top: 3px; color: var(--muted); }
 .faculty-row > span:last-child { display: flex; gap: 6px; }
+.conflict-panel { border-left: 4px solid var(--warn, #d97706); }
 .faculty-assignment { align-items: flex-start; }
 .class-checks { flex-wrap: wrap; justify-content: flex-end; max-width: 620px; }
 .class-checks label { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }

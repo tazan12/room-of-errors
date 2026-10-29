@@ -99,6 +99,9 @@ const API = (() => {
     studentApprovals: () => req('GET', '/api/admin/student-approvals'),
     reviewStudent: (userId, decision) => req('PUT', `/api/admin/student-approvals/${userId}`, { decision }),
     manageStudentRoute: (userId, className) => req('PUT', `/api/admin/students/${userId}/route`, { className }),
+    studentNumberConflicts: () => req('GET', '/api/admin/student-number-conflicts'),
+    resolveStudentNumberConflict: (id) => req('POST', `/api/admin/student-number-conflicts/${id}/resolve`),
+    releaseStudentNumber: (userId) => req('POST', `/api/admin/students/${userId}/release-student-number`),
     async me() {
       currentUser = await req('GET', '/api/auth/me');
       sessionStorage.setItem('roe_user', JSON.stringify(currentUser));

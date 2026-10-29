@@ -175,6 +175,27 @@ async function manageStudentRoute(token, adminUserId, userId, className) {
   return data;
 }
 
+async function reportStudentNumberConflict(token, studentNumber) {
+  const { error } = await client(token).rpc('roe_report_student_number_conflict', { p_student_number: studentNumber });
+  if (error) throw error;
+}
+
+async function listStudentNumberConflicts(token) {
+  const { data, error } = await client(token).rpc('roe_list_student_number_conflicts');
+  if (error) throw error;
+  return data || [];
+}
+
+async function resolveStudentNumberConflict(token, conflictId) {
+  const { error } = await client(token).rpc('roe_resolve_student_number_conflict', { conflict_id: conflictId });
+  if (error) throw error;
+}
+
+async function releaseStudentNumber(token, userId) {
+  const { error } = await client(token).rpc('roe_release_student_number', { target_user_id: userId });
+  if (error) throw error;
+}
+
 async function createSession(token, userId, data) {
   const sb = client(token);
   const className = String(data.className || '').toUpperCase();
@@ -241,4 +262,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, reportStudentNumberConflict, listStudentNumberConflicts, resolveStudentNumberConflict, releaseStudentNumber, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };

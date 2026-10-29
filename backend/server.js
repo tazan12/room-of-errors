@@ -112,17 +112,47 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 app.put('/api/auth/profile', requireAuth, async (req, res) => {
   try {
     if (['admin', 'faculty'].includes(req.auth.role)) return res.status(403).json({ error: '학생 계정만 학생 정보를 수정할 수 있습니다.' });
-    const { fullName, studentNumber, grade, className, facultyUserId } = req.body || {};
+    const body = req.body || {};
+    const { grade, className, facultyUserId } = body;
+    const fullName = String(body.fullName || '').trim();
+    // 공백·하이픈이 섞여 들어오면 같은 학번이 다른 값으로 저장되므로 숫자/영문만 남긴다.
+    const studentNumber = String(body.studentNumber || '').replace(/[\s-]/g, '');
     if (!fullName || !studentNumber || !grade || !className || !facultyUserId) return res.status(400).json({ error: '이름, 학번, 학년, 지도교수, 분반을 모두 입력하세요.' });
+    if (!/^[0-9A-Za-z]{4,20}$/.test(studentNumber)) return res.status(400).json({ error: '학번을 올바르게 입력하세요(예: 23801001).' });
     if (!['1', '2', '3', '4'].includes(String(grade))) return res.status(400).json({ error: '학년을 올바르게 선택하세요.' });
     const routes = await db.listFacultyRoutes(req.auth.token);
     if (!routes.some((r) => r.user_id === facultyUserId && r.classes.includes(className))) return res.status(400).json({ error: '지도교수에게 배정된 분반을 선택하세요.' });
-    const profile = await db.updateProfile(req.auth.token, req.auth.user.id, { fullName, studentNumber, grade: Number(grade), className, facultyUserId });
-    res.json(profile);
+    try {
+      const profile = await db.updateProfile(req.auth.token, req.auth.user.id, { fullName, studentNumber, grade: Number(grade), className, facultyUserId });
+      return res.json(profile);
+    } catch (e) {
+      const duplicate = e.code === '23505' || /duplicate|unique/i.test(e.message || '');
+      if (!duplicate) throw e;
+      // 학생은 다른 계정의 정보를 볼 수 없으므로, 충돌을 기록해 교수자 대시보드에 띄운다.
+      await db.reportStudentNumberConflict(req.auth.token, studentNumber)
+        .catch((err) => console.error('[profile] conflict report failed:', err?.message || err));
+      return res.status(409).json({
+        error: `학번 ${studentNumber}은(는) 이미 다른 계정에 등록되어 있습니다. 학번을 다시 확인해 주세요. 본인 학번이 맞다면 담당 교수에게 알려 주세요 — 교수자 화면에 중복 내역이 표시됩니다.`,
+      });
+    }
   } catch (e) {
-    const duplicate = e.code === '23505' || /duplicate|unique/i.test(e.message || '');
-    res.status(duplicate ? 409 : 400).json({ error: duplicate ? '이미 등록된 학번입니다.' : e.message });
+    res.status(400).json({ error: e.message });
   }
+});
+
+app.get('/api/admin/student-number-conflicts', requireAuth, requireInstructor, async (req, res) => {
+  try { res.json(await db.listStudentNumberConflicts(req.auth.token)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/admin/student-number-conflicts/:id/resolve', requireAuth, requireInstructor, async (req, res) => {
+  try { await db.resolveStudentNumberConflict(req.auth.token, req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/admin/students/:userId/release-student-number', requireAuth, requireAdmin, async (req, res) => {
+  try { await db.releaseStudentNumber(req.auth.token, req.params.userId); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post('/api/faculty/request', requireAuth, async (req, res) => {

@@ -123,7 +123,7 @@
       <h2>학생 정보 및 분반 선택</h2><p class="muted">분반을 선택하면 해당 분반의 지도교수가 자동으로 배정됩니다.</p>
       <div class="form-grid">
         <label>이름<input id="profileName" autocomplete="name" value="${esc(profile.full_name || '')}" /></label>
-        <label>학번<input id="profileNumber" inputmode="numeric" value="${esc(profile.student_number || '')}" /></label>
+        <label>학번<input id="profileNumber" inputmode="numeric" placeholder="예: 23801001" value="${esc(profile.student_number || '')}" /></label>
         <label>학년<select id="profileGrade"><option value="">선택</option>${[1,2,3,4].map((g) => `<option value="${g}" ${Number(profile.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
         <label>분반<select id="profileClass"><option value="">선택</option>${routes.flatMap((r) => r.classes.map((c) => `<option value="${c}" ${profile.class_name===c?'selected':''}>${c} · ${esc(r.full_name || r.email)} 교수</option>`)).join('')}</select></label>
       </div><button class="btn primary lg full" id="saveProfile">저장하고 승인 요청</button>
@@ -943,16 +943,19 @@
   async function viewProfessor(preCase, preClass) {
     if (!API.isInstructor()) return openAdminLogin();
     document.body.classList.remove('in-room');
-    const [sessionsResult, facultyResult, studentsResult, routesResult] = await Promise.allSettled([
+    const [sessionsResult, facultyResult, studentsResult, routesResult, conflictsResult] = await Promise.allSettled([
       API.professorSessions({ ...(preCase ? { caseId: preCase } : {}), ...(preClass ? { className: preClass } : {}) }),
       API.isAdmin() ? API.facultyRequests() : Promise.resolve([]),
       API.studentApprovals(),
       API.facultyRoutes(),
+      API.studentNumberConflicts(),
     ]);
     const rows = sessionsResult.status === 'fulfilled' ? sessionsResult.value : [];
     const facultyRequests = facultyResult.status === 'fulfilled' ? facultyResult.value : [];
     const studentApprovals = studentsResult.status === 'fulfilled' ? studentsResult.value : [];
     const facultyRoutes = routesResult.status === 'fulfilled' ? routesResult.value : [];
+    const conflicts = conflictsResult.status === 'fulfilled' ? conflictsResult.value : [];
+    const fmtTime = (t) => (t ? new Date(t).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
     const classNames = ['A1','B1','C1','D1','A2','B2','C2','D2'];
     const loadWarnings = [
       sessionsResult.status === 'rejected' ? `학생 실습 기록: ${sessionsResult.reason?.message || '불러오기 실패'}` : '',
@@ -970,15 +973,36 @@
           </div>
         </div>
         ${loadWarnings.length ? `<div class="panel"><p class="muted">관리자 로그인은 완료되었습니다. 일부 자료를 불러오지 못했습니다.</p><p>${loadWarnings.map(esc).join('<br>')}</p></div>` : ''}
+        ${conflicts.length ? `<div class="panel faculty-approval conflict-panel">
+          <h3>학번 중복으로 등록하지 못한 학생 <small class="muted">${conflicts.length}건</small></h3>
+          <p class="muted">아래 학생이 입력한 학번이 이미 다른 계정에 저장되어 있어 학생 정보 저장이 막혔습니다.
+            두 사람 중 누가 학번을 잘못 입력했는지 확인하세요.
+            ${API.isAdmin() ? '기존 등록자가 잘못 입력했다면 <b>기존 학번 해제</b>를 누르면 됩니다(해당 학생은 다음 접속 때 학번을 다시 입력). 신청 학생이 잘못 입력했다면 학생에게 알리고 <b>확인 완료</b>를 누르세요.' : '기존 등록 학번 해제는 총괄관리자에게 요청하세요.'}</p>
+          ${conflicts.map((c) => `<div class="faculty-row">
+            <span><b>${esc(c.requester_name || '이름 미등록')} → 학번 ${esc(c.student_number)}</b>
+              <small>신청: ${esc(c.requester_email)} · ${esc(fmtTime(c.attempted_at))} · 시도 ${esc(c.attempts)}회</small>
+              <small>기존 등록: ${c.owner_user_id ? `${esc(c.owner_name || '이름 미등록')} · ${esc(c.owner_email)} · ${esc(c.owner_class_name || '-')} · ${esc(c.owner_approval_status)}` : '기존 등록자 없음(이미 해제됨 — 학생에게 다시 저장하라고 안내)'}</small></span>
+            <span>
+              ${API.isAdmin() && c.owner_user_id ? `<button class="btn tiny" data-release-number="${c.owner_user_id}" data-number="${esc(c.student_number)}" data-owner="${esc(c.owner_name)}">기존 학번 해제</button>` : ''}
+              <button class="btn tiny ghost" data-resolve-conflict="${c.id}">확인 완료</button>
+            </span>
+          </div>`).join('')}
+        </div>` : ''}
         <div class="panel faculty-approval">
           <h3>학생 사용 승인</h3>
-          ${studentApprovals.length ? studentApprovals.map((r) => `<div class="faculty-row">
-            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(r.approval_status)}</small></span>
+          ${studentApprovals.length ? studentApprovals.map((r) => {
+            const incomplete = !(r.student_number && r.grade && r.class_name && r.faculty_user_id);
+            const statusLabel = incomplete ? '정보 미입력' : ({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.approval_status] || r.approval_status);
+            return `<div class="faculty-row">
+            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(statusLabel)}</small></span>
             <span>
               ${API.isAdmin() ? `<select data-student-class="${r.user_id}"><option value="">분반 선택</option>${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c}</option>`).join('')}</select><button class="btn tiny" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
-              <button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>
+              ${incomplete
+                ? '<small class="muted">학생이 정보를 저장하면 승인할 수 있습니다</small>'
+                : `<button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>`}
             </span>
-          </div>`).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
+          </div>`;
+          }).join('') : '<p class="muted">등록된 학생이 없습니다.</p>'}
         </div>
         ${API.isAdmin() ? `<div class="panel faculty-approval">
           <h3>교수자 권한 신청</h3>
@@ -1063,6 +1087,15 @@
     }));
     app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
+      catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-release-number]').forEach((btn) => btn.addEventListener('click', async () => {
+      if (!window.confirm(`${btn.dataset.owner || '기존 등록자'} 계정에서 학번 ${btn.dataset.number}을(를) 해제할까요?\n해당 학생은 다음 접속 때 학번을 다시 입력해야 합니다. 기존 실습 기록은 유지됩니다.`)) return;
+      try { await API.releaseStudentNumber(btn.dataset.releaseNumber); toast('기존 학번을 해제했습니다. 신청 학생에게 학생 정보를 다시 저장하라고 안내하세요.', 'ok'); viewProfessor(preCase, preClass); }
+      catch (e) { toast(e.message || '학번 해제 실패', 'warn'); }
+    }));
+    app.querySelectorAll('[data-resolve-conflict]').forEach((btn) => btn.addEventListener('click', async () => {
+      try { await API.resolveStudentNumberConflict(btn.dataset.resolveConflict); toast('확인 완료로 처리했습니다.', 'ok'); viewProfessor(preCase, preClass); }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
     }));
     app.querySelectorAll('[data-move-student]').forEach((btn) => btn.addEventListener('click', async () => {
