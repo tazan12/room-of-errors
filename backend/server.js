@@ -150,6 +150,11 @@ app.post('/api/admin/student-number-conflicts/:id/resolve', requireAuth, require
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+app.put('/api/admin/students/:userId/profile', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json(await db.adminUpdateStudent(req.auth.token, req.params.userId, req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/admin/students/:userId/release-student-number', requireAuth, requireAdmin, async (req, res) => {
   try { await db.releaseStudentNumber(req.auth.token, req.params.userId); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }

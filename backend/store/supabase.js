@@ -196,6 +196,15 @@ async function releaseStudentNumber(token, userId) {
   if (error) throw error;
 }
 
+async function adminUpdateStudent(token, userId, { fullName, studentNumber, grade, className }) {
+  const { data, error } = await client(token).rpc('roe_admin_update_student', {
+    target_user_id: userId, p_full_name: fullName, p_student_number: studentNumber,
+    p_grade: Number(grade), p_class_name: className,
+  });
+  if (error) throw error;
+  return data;
+}
+
 async function createSession(token, userId, data) {
   const sb = client(token);
   const className = String(data.className || '').toUpperCase();
@@ -262,4 +271,4 @@ async function listSessions(token, filter = {}) {
   return (data || []).map(toSession);
 }
 
-module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, reportStudentNumberConflict, listStudentNumberConflicts, resolveStudentNumberConflict, releaseStudentNumber, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };
+module.exports = { configured, getIdentity, signUp, signIn, updateProfile, requestFacultyAccess, listFacultyRequests, listFacultyRoutes, assignFacultyClasses, reviewFacultyRequest, listStudentApprovals, reviewStudentApproval, manageStudentRoute, reportStudentNumberConflict, listStudentNumberConflicts, resolveStudentNumberConflict, releaseStudentNumber, adminUpdateStudent, createSession, createPreviewSession, PREVIEW_CLASS, getSession, updateSession, listSessions };

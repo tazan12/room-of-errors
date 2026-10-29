@@ -989,16 +989,19 @@
           </div>`).join('')}
         </div>` : ''}
         <div class="panel faculty-approval">
-          <h3>학생 사용 승인</h3>
+          <h3>학생 사용 승인 <small class="muted">${studentApprovals.filter((r) => !(r.student_number && r.grade && r.class_name && r.faculty_user_id) || String(r.student_number || '').startsWith('임시') || r.approval_status !== 'approved').length}건 확인 필요</small></h3>
+          <label class="muted needs-check-toggle"><input type="checkbox" id="onlyNeedsCheck"> 확인 필요만 보기(정보 미입력·임시 학번·승인 대기·거절)</label>
           ${studentApprovals.length ? studentApprovals.map((r) => {
             const incomplete = !(r.student_number && r.grade && r.class_name && r.faculty_user_id);
+            const tempNumber = String(r.student_number || '').startsWith('임시');
             const statusLabel = incomplete ? '정보 미입력' : ({ pending: '승인 대기', approved: '승인', rejected: '거절' }[r.approval_status] || r.approval_status);
-            return `<div class="faculty-row">
-            <span><b>${esc(r.full_name || '이름 미등록')}</b><small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(statusLabel)}</small></span>
+            return `<div class="faculty-row" data-student-row="${r.user_id}">
+            <span><b>${esc(r.full_name || '이름 미등록')}</b>${tempNumber ? ' <em class="badge-warn">학번 확인 필요</em>' : ''}<small>학번 ${esc(r.student_number || '-')} · ${esc(r.grade || '-')}학년 · ${esc(r.class_name || '-')} · 지도교수 ${esc(facultyRoutes.find((f) => f.user_id === r.faculty_user_id)?.full_name || '-')} · ${esc(statusLabel)}</small></span>
             <span>
               ${API.isAdmin() ? `<select data-student-class="${r.user_id}"><option value="">분반 선택</option>${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c}</option>`).join('')}</select><button class="btn tiny" data-move-student="${r.user_id}">분반 이동</button><button class="btn tiny ghost" data-unassign-student="${r.user_id}">분반 해제</button>` : ''}
+              ${API.isAdmin() ? `<button class="btn tiny" data-edit-student="${r.user_id}">정보 수정</button>` : ''}
               ${incomplete
-                ? '<small class="muted">학생이 정보를 저장하면 승인할 수 있습니다</small>'
+                ? `<small class="muted">${API.isAdmin() ? '정보 수정으로 직접 등록 가능' : '학생이 정보를 저장하면 승인할 수 있습니다'}</small>`
                 : `<button class="btn tiny" data-student="${r.user_id}" data-decision="approved">승인</button><button class="btn tiny ghost" data-student="${r.user_id}" data-decision="rejected">거절</button>`}
             </span>
           </div>`;
@@ -1088,6 +1091,34 @@
     app.querySelectorAll('[data-student]').forEach((btn) => btn.addEventListener('click', async () => {
       try { await API.reviewStudent(btn.dataset.student, btn.dataset.decision); toast(btn.dataset.decision === 'approved' ? '학생 사용을 승인했습니다.' : '학생 사용을 거절했습니다.', 'ok'); viewProfessor(); }
       catch (e) { toast(e.message || '처리 실패', 'warn'); }
+    }));
+    app.querySelector('#onlyNeedsCheck')?.addEventListener('change', (e) => {
+      app.querySelectorAll('[data-student-row]').forEach((row) => {
+        const r = studentApprovals.find((x) => x.user_id === row.dataset.studentRow);
+        const needs = !r || !(r.student_number && r.grade && r.class_name && r.faculty_user_id) || String(r.student_number || '').startsWith('임시') || r.approval_status !== 'approved';
+        row.style.display = e.target.checked && !needs ? 'none' : '';
+      });
+    });
+    app.querySelectorAll('[data-edit-student]').forEach((btn) => btn.addEventListener('click', () => {
+      const r = studentApprovals.find((x) => x.user_id === btn.dataset.editStudent);
+      const row = app.querySelector(`[data-student-row="${btn.dataset.editStudent}"]`);
+      if (!r || !row) return;
+      row.innerHTML = `<div class="student-edit">
+        <label>이름<input data-f="fullName" value="${esc(r.full_name || '')}"></label>
+        <label>학번<input data-f="studentNumber" inputmode="numeric" placeholder="모르면 비워두기" value="${esc(r.student_number || '')}"></label>
+        <label>학년<select data-f="grade">${[1,2,3,4].map((g) => `<option value="${g}" ${Number(r.grade)===g?'selected':''}>${g}학년</option>`).join('')}</select></label>
+        <label>분반<select data-f="className">${classNames.map((c) => `<option value="${c}" ${r.class_name===c?'selected':''}>${c} · ${esc(facultyRoutes.find((f) => f.classes.includes(c))?.full_name || '교수 미배정')}</option>`).join('')}</select></label>
+        <span><button class="btn tiny" data-save-edit>저장·승인</button><button class="btn tiny ghost" data-cancel-edit>취소</button></span>
+        <small class="muted">저장하면 해당 분반 지도교수가 배정되고 바로 사용 승인됩니다. 학번이 다른 계정과 겹치면 그 계정을 알려 드립니다.</small>
+      </div>`;
+      const val = (f) => row.querySelector(`[data-f="${f}"]`).value.trim();
+      row.querySelector('[data-cancel-edit]').addEventListener('click', () => viewProfessor(preCase, preClass));
+      row.querySelector('[data-save-edit]').addEventListener('click', async () => {
+        try {
+          await API.adminUpdateStudent(r.user_id, { fullName: val('fullName'), studentNumber: val('studentNumber'), grade: val('grade'), className: val('className') });
+          toast(`${val('fullName')} 학생 정보를 저장하고 승인했습니다.`, 'ok'); viewProfessor(preCase, preClass);
+        } catch (e) { toast(e.message || '학생 정보 수정 실패', 'warn'); }
+      });
     }));
     app.querySelectorAll('[data-release-number]').forEach((btn) => btn.addEventListener('click', async () => {
       if (!window.confirm(`${btn.dataset.owner || '기존 등록자'} 계정에서 학번 ${btn.dataset.number}을(를) 해제할까요?\n해당 학생은 다음 접속 때 학번을 다시 입력해야 합니다. 기존 실습 기록은 유지됩니다.`)) return;

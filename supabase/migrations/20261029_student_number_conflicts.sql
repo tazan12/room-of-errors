@@ -108,3 +108,52 @@ end;
 $$;
 revoke all on function public.roe_resolve_student_number_conflict(uuid) from public, anon;
 grant execute on function public.roe_resolve_student_number_conflict(uuid) to authenticated;
+
+-- 총괄관리자: 학생 정보(이름·학번·학년·분반)를 직접 수정하고 승인 상태로 둔다.
+-- 학번이 다른 계정과 겹치면 그 계정을 알려 주어 바로 정리할 수 있게 한다.
+create or replace function public.roe_admin_update_student(
+  target_user_id uuid, p_full_name text, p_student_number text, p_grade smallint, p_class_name text
+)
+returns public.roe_profiles
+language plpgsql security definer set search_path = '' as $$
+declare
+  num text := nullif(regexp_replace(coalesce(p_student_number, ''), '[[:space:]-]', '', 'g'), '');
+  cls text := upper(btrim(coalesce(p_class_name, '')));
+  route public.roe_faculty_classes;
+  owner_name text;
+  owner_email text;
+  result public.roe_profiles;
+begin
+  if coalesce((select auth.jwt()->'app_metadata'->>'role'), '') <> 'admin' then
+    raise exception '총괄관리자 권한이 필요합니다.';
+  end if;
+  if btrim(coalesce(p_full_name, '')) = '' then raise exception '이름을 입력하세요.'; end if;
+  if p_grade is null or p_grade not between 1 and 4 then raise exception '학년을 선택하세요.'; end if;
+  select * into route from public.roe_faculty_classes where class_name = cls;
+  if route.class_name is null then raise exception '지도교수가 배정된 분반을 선택하세요.'; end if;
+  if num is not null then
+    select p.full_name, u.email into owner_name, owner_email
+    from public.roe_profiles p left join auth.users u on u.id = p.user_id
+    where p.student_number = num and p.user_id <> target_user_id;
+    if found then
+      raise exception '학번 %은(는) 이미 % (%) 계정에 등록되어 있습니다. 그 계정의 학번을 먼저 수정하거나 해제하세요.',
+        num, coalesce(nullif(owner_name, ''), '이름 미등록'), coalesce(owner_email, '');
+    end if;
+  end if;
+  update public.roe_profiles
+  set full_name = btrim(p_full_name), student_number = num, grade = p_grade,
+      class_name = route.class_name, faculty_user_id = route.faculty_user_id,
+      approval_status = 'approved', approved_at = now(), approved_by = auth.uid(), updated_at = now()
+  where user_id = target_user_id and role = 'student'
+  returning * into result;
+  if result.user_id is null then raise exception '학생 계정을 찾지 못했습니다.'; end if;
+  if num is not null then
+    update public.roe_student_number_conflicts
+    set resolved_at = now(), resolved_by = auth.uid()
+    where user_id = target_user_id and resolved_at is null;
+  end if;
+  return result;
+end;
+$$;
+revoke all on function public.roe_admin_update_student(uuid, text, text, smallint, text) from public, anon;
+grant execute on function public.roe_admin_update_student(uuid, text, text, smallint, text) to authenticated;
